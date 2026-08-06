@@ -32,7 +32,7 @@ jobs:
             --collect-all PySide6 `
             --hidden-import h5py `
             --hidden-import numpy `
-            src/cellondesk/desktop.py
+            packaging/windows/launcher.py
       - name: Smoke-test packaged executable
         shell: pwsh
         run: |
