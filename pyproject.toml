@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cellondesk"
+version = "0.1.0"
+description = "Local-first desktop discovery client for public single-cell and spatial omics datasets"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "BSD-3-Clause"}
+authors = [{name = "YuChen Liu"}]
+dependencies = ["httpx>=0.27", "pydantic>=2.7", "typer>=0.12"]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.7"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
+
+[project.scripts]
+cellondesk = "cellondesk.cli:app"
+cellondesk-gui = "cellondesk.gui:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cellondesk"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
