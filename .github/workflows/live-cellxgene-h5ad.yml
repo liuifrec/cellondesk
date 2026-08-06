@@ -1,0 +1,19 @@
+name: Live CELLxGENE H5AD
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 4 * * 1"
+
+jobs:
+  public-h5ad-gene-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[data]"
+      - run: python scripts/live_cellxgene_h5ad_smoke.py

@@ -6,8 +6,10 @@ from typing import Annotated
 
 import typer
 
+from .expression import inspect_gene_expression
+from .gene_report import write_gene_expression_report
+from .h5ad_compat import inspect_h5ad as inspect_h5ad_file
 from .h5ad_report import write_h5ad_report
-from .inspection import inspect_h5ad as inspect_h5ad_file
 from .manifest import write_hubmap_manifest
 from .report import write_html_report
 from .sources.hubmap import HuBMAPClient
@@ -102,3 +104,45 @@ def inspect_h5ad_command(
     if html_report:
         write_h5ad_report(inspection, html_report)
         typer.echo(f"Wrote {html_report}")
+
+
+@app.command("preview-gene")
+def preview_gene_command(
+    path: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True),
+    ],
+    gene: Annotated[str, typer.Argument(help="Gene identifier or symbol")],
+    html_report: Annotated[
+        Path,
+        typer.Option("--html", help="Write a self-contained expression dashboard"),
+    ] = Path("gene-expression.html"),
+    json_output: Annotated[
+        Path | None,
+        typer.Option("--json", help="Write sampled expression values as JSON"),
+    ] = None,
+    layer: Annotated[
+        str | None,
+        typer.Option(help="Read from a named layer instead of X"),
+    ] = None,
+    max_points: Annotated[
+        int,
+        typer.Option(min=1, max=50000, help="Maximum sampled observations"),
+    ] = 5000,
+) -> None:
+    inspection = inspect_h5ad_file(path, max_points=max_points)
+    expression = inspect_gene_expression(
+        path,
+        gene,
+        max_points=max_points,
+        layer=layer,
+        embedding_keys=[item.key for item in inspection.embeddings],
+    )
+    write_gene_expression_report(inspection, expression, html_report)
+    typer.echo(
+        f"{expression.matched_gene}: {expression.nonzero_sampled:,} non-zero values "
+        f"among {expression.sampled_observations:,} sampled observations"
+    )
+    typer.echo(f"Wrote {html_report}")
+    if json_output:
+        json_output.write_text(expression.model_dump_json(indent=2), encoding="utf-8")
