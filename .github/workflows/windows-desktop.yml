@@ -42,7 +42,7 @@ jobs:
           if (!$report.python) { throw "Packaged diagnostics are incomplete" }
       - name: Create portable ZIP
         shell: pwsh
-        run: Compress-Archive -Path dist\CellOnDesk\* -DestinationPath CellOnDesk-0.9.0-Windows-x64-portable.zip
+        run: Compress-Archive -Path dist\CellOnDesk\* -DestinationPath CellOnDesk-0.10.0-Windows-x64-portable.zip
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
@@ -50,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force installer | Out-Null
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.9.0 packaging\windows\CellOnDesk.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.10.0 packaging\windows\CellOnDesk.iss
       - name: Smoke-test installer
         shell: pwsh
         run: |
@@ -61,9 +61,9 @@ jobs:
           & "$installDir\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
       - uses: actions/upload-artifact@v4
         with:
-          name: CellOnDesk-0.9.0-Windows-x64
+          name: CellOnDesk-0.10.0-Windows-x64
           path: |
-            CellOnDesk-0.9.0-Windows-x64-portable.zip
+            CellOnDesk-0.10.0-Windows-x64-portable.zip
             installer/CellOnDesk-Setup-x64.exe
             packaged-diagnostics.json
             installed-diagnostics.json
