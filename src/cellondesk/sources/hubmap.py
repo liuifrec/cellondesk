@@ -40,7 +40,7 @@ class HuBMAPClient:
             headers=headers,
             timeout=timeout,
             transport=transport,
-            follow_redirects=True,
+            follow_redirects=False,
         )
 
     def close(self) -> None:
@@ -69,10 +69,21 @@ class HuBMAPClient:
             params["status"] = status
         if not params:
             raise ValueError("HuBMAP parameterized search requires at least one filter")
+
         response = self._client.get(SEARCH_URL, params=params)
+        if response.status_code == 303:
+            location = response.headers.get("location")
+            if not location:
+                raise httpx.HTTPStatusError(
+                    "HuBMAP returned a redirect without a location",
+                    request=response.request,
+                    response=response,
+                )
+            response = self._client.get(location)
         if response.status_code == 404:
             return []
         response.raise_for_status()
+
         bounded_limit = max(1, min(limit, 1000))
         return [_normalize_hit(hit) for hit in _extract_hits(response.json())[:bounded_limit]]
 
