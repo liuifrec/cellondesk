@@ -14,7 +14,7 @@ from .h5ad_compat import inspect_h5ad as inspect_h5ad_file
 from .h5ad_report import write_h5ad_report
 from .manifest import write_hubmap_manifest
 from .report import write_html_report
-from .sources.census import CensusQuery, preview_census_gene
+from .sources.census import CensusQuery, list_census_values, preview_census_gene
 from .sources.hubmap import HuBMAPClient
 
 app = typer.Typer(help="Search, inspect, and prepare public single-cell and spatial omics data.")
@@ -125,6 +125,41 @@ def preview_gene_command(
     typer.echo(f"Wrote {html_report}")
     if json_output:
         json_output.write_text(expression.model_dump_json(indent=2), encoding="utf-8")
+
+
+@app.command("census-values")
+def census_values_command(
+    field: Annotated[str, typer.Argument(help="Census metadata field to inspect")],
+    organism: Annotated[str, typer.Option(help="Census organism label")] = "Homo sapiens",
+    contains: Annotated[
+        str | None,
+        typer.Option(help="Case-insensitive substring applied to metadata labels"),
+    ] = None,
+    census_version: Annotated[str, typer.Option(help="Census version or stable alias")] = "stable",
+    limit: Annotated[int, typer.Option(min=1, max=500)] = 50,
+    json_output: Annotated[
+        Path | None,
+        typer.Option("--json", help="Write matching values and counts as JSON"),
+    ] = None,
+) -> None:
+    result = list_census_values(
+        field,
+        organism=organism,
+        contains=contains,
+        census_version=census_version,
+        limit=limit,
+    )
+    typer.echo(
+        f"{result.field} values for {result.organism} "
+        f"(Census {result.resolved_census_version})"
+    )
+    for item in result.values:
+        ontology = item.ontology_term_id or ""
+        unique = "" if item.unique_cell_count is None else f"\t{item.unique_cell_count}"
+        typer.echo(f"{item.label}\t{ontology}\t{item.total_cell_count}{unique}")
+    if json_output:
+        json_output.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        typer.echo(f"Wrote {json_output}")
 
 
 @app.command("census-preview")
