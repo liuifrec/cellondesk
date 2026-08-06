@@ -6,6 +6,7 @@ from typing import Annotated
 
 import typer
 
+from .census_report import write_census_report
 from .expression import inspect_gene_expression
 from .gene_report import write_gene_expression_report
 from .h5ad_compat import inspect_h5ad as inspect_h5ad_file
@@ -168,9 +169,13 @@ def census_preview_command(
         typer.Option("--include-non-primary", help="Include duplicated/non-primary cells"),
     ] = False,
     json_output: Annotated[
-        Path,
+        Path | None,
         typer.Option("--json", help="Write the bounded Census preview as JSON"),
     ] = Path("census-gene-preview.json"),
+    html_report: Annotated[
+        Path | None,
+        typer.Option("--html", help="Write a self-contained Census expression dashboard"),
+    ] = Path("census-gene-preview.html"),
 ) -> None:
     result = preview_census_gene(
         CensusQuery(
@@ -186,9 +191,13 @@ def census_preview_command(
             max_cells=max_cells,
         )
     )
-    json_output.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    if json_output:
+        json_output.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        typer.echo(f"Wrote {json_output}")
+    if html_report:
+        write_census_report(result, html_report)
+        typer.echo(f"Wrote {html_report}")
     typer.echo(
         f"{result.matched_gene}: {result.nonzero_sampled:,} non-zero values among "
         f"{result.sampled_cells:,} sampled cells ({result.total_matching_cells:,} matched)"
     )
-    typer.echo(f"Wrote {json_output}")
