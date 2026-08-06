@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cellondesk"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local-first desktop discovery client for public single-cell and spatial omics datasets"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,7 +20,15 @@ dependencies = [
 [project.optional-dependencies]
 gui = ["PySide6>=6.7"]
 data = ["h5py>=3.11", "numpy>=1.26"]
-dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "h5py>=3.11", "numpy>=1.26"]
+census = ["cellxgene-census>=1.15"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "h5py>=3.11",
+    "numpy>=1.26",
+    "pandas>=2.2",
+]
 
 [project.scripts]
 cellondesk = "cellondesk.cli:app"
