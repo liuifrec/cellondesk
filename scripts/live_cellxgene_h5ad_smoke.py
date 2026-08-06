@@ -7,8 +7,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from cellondesk import inspect_h5ad
-from cellondesk.expression import inspect_gene_expression
+from cellondesk import inspect_gene_expression, inspect_h5ad
 from cellondesk.gene_report import write_gene_expression_report
 
 SOURCE_URL = (
@@ -77,6 +76,7 @@ def main() -> None:
                     "variables": inspection.n_vars,
                     "embeddings": [item.key for item in inspection.embeddings],
                     "matched_gene": expression.matched_gene,
+                    "matched_field": expression.matched_field,
                     "nonzero_sampled": expression.nonzero_sampled,
                     "report_bytes": report_path.stat().st_size,
                     "checks": checks,
