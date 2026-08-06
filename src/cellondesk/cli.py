@@ -12,6 +12,7 @@ from .h5ad_compat import inspect_h5ad as inspect_h5ad_file
 from .h5ad_report import write_h5ad_report
 from .manifest import write_hubmap_manifest
 from .report import write_html_report
+from .sources.census import CensusQuery, preview_census_gene
 from .sources.hubmap import HuBMAPClient
 
 app = typer.Typer(help="Search, inspect, and prepare public single-cell and spatial omics data.")
@@ -146,3 +147,48 @@ def preview_gene_command(
     typer.echo(f"Wrote {html_report}")
     if json_output:
         json_output.write_text(expression.model_dump_json(indent=2), encoding="utf-8")
+
+
+@app.command("census-preview")
+def census_preview_command(
+    gene: Annotated[str, typer.Argument(help="Exact gene symbol or feature ID")],
+    organism: Annotated[str, typer.Option(help="Census organism label")] = "Homo sapiens",
+    tissue: Annotated[str | None, typer.Option(help="Exact tissue_general value")] = None,
+    cell_type: Annotated[str | None, typer.Option(help="Exact cell_type value")] = None,
+    disease: Annotated[str | None, typer.Option(help="Exact disease value")] = None,
+    assay: Annotated[str | None, typer.Option(help="Exact assay value")] = None,
+    dataset_id: Annotated[str | None, typer.Option(help="Exact CELLxGENE dataset ID")] = None,
+    census_version: Annotated[str, typer.Option(help="Census version or stable alias")] = "stable",
+    max_cells: Annotated[
+        int,
+        typer.Option(min=1, max=50000, help="Maximum cells materialized from SOMA"),
+    ] = 5000,
+    include_non_primary: Annotated[
+        bool,
+        typer.Option("--include-non-primary", help="Include duplicated/non-primary cells"),
+    ] = False,
+    json_output: Annotated[
+        Path,
+        typer.Option("--json", help="Write the bounded Census preview as JSON"),
+    ] = Path("census-gene-preview.json"),
+) -> None:
+    result = preview_census_gene(
+        CensusQuery(
+            organism=organism,
+            gene=gene,
+            tissue=tissue,
+            cell_type=cell_type,
+            disease=disease,
+            assay=assay,
+            dataset_id=dataset_id,
+            primary_only=not include_non_primary,
+            census_version=census_version,
+            max_cells=max_cells,
+        )
+    )
+    json_output.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    typer.echo(
+        f"{result.matched_gene}: {result.nonzero_sampled:,} non-zero values among "
+        f"{result.sampled_cells:,} sampled cells ({result.total_matching_cells:,} matched)"
+    )
+    typer.echo(f"Wrote {json_output}")
