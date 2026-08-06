@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from typing import Any, Self
+from typing import Any
 
 import httpx
+from typing_extensions import Self
 
 from cellondesk.models import DatasetRecord
 
-SEARCH_URL = "https://search.api.hubmapconsortium.org/v3/param-search"
+SEARCH_URL = "https://search.api.hubmapconsortium.org/v3/param-search/datasets"
 PORTAL_DATASET_URL = "https://portal.hubmapconsortium.org/browse/dataset/{uuid}"
 SPATIAL_DATASET_TYPES = (
     "Visium (no probes)",
@@ -39,6 +40,7 @@ class HuBMAPClient:
             headers=headers,
             timeout=timeout,
             transport=transport,
+            follow_redirects=True,
         )
 
     def close(self) -> None:
@@ -58,19 +60,21 @@ class HuBMAPClient:
         status: str | None = "Published",
         limit: int = 100,
     ) -> list[DatasetRecord]:
-        params: dict[str, Any] = {
-            "entity_type": "Dataset",
-            "size": max(1, min(limit, 1000)),
-        }
+        params: dict[str, Any] = {}
         if dataset_type:
             params["dataset_type"] = dataset_type
         if organ:
-            params["organ"] = organ
+            params["origin_samples.organ"] = organ
         if status:
             params["status"] = status
+        if not params:
+            raise ValueError("HuBMAP parameterized search requires at least one filter")
         response = self._client.get(SEARCH_URL, params=params)
+        if response.status_code == 404:
+            return []
         response.raise_for_status()
-        return [_normalize_hit(hit) for hit in _extract_hits(response.json())[:limit]]
+        bounded_limit = max(1, min(limit, 1000))
+        return [_normalize_hit(hit) for hit in _extract_hits(response.json())[:bounded_limit]]
 
 
 def _extract_hits(payload: Any) -> list[Mapping[str, Any]]:
@@ -96,17 +100,14 @@ def _normalize_hit(hit: Mapping[str, Any]) -> DatasetRecord:
     source = hit.get("_source", hit)
     if not isinstance(source, Mapping):
         source = hit
-    dataset_id = str(
-        source.get("uuid")
-        or source.get("hubmap_id")
-        or source.get("id")
-        or ""
-    )
+    dataset_uuid = str(source.get("uuid") or "")
+    hubmap_id = str(source.get("hubmap_id") or "")
+    dataset_id = dataset_uuid or hubmap_id or str(source.get("id") or "")
     title = str(
         source.get("title")
         or source.get("dataset_info")
         or source.get("description")
-        or source.get("hubmap_id")
+        or hubmap_id
         or dataset_id
         or "Untitled HuBMAP dataset"
     )
@@ -116,15 +117,24 @@ def _normalize_hit(hit: Mapping[str, Any]) -> DatasetRecord:
         if isinstance(donor, Mapping)
         else source.get("donor_id")
     )
+    origin_samples = source.get("origin_samples")
+    organ = source.get("organ")
+    if not organ and isinstance(origin_samples, list):
+        organ_values = [
+            sample.get("organ")
+            for sample in origin_samples
+            if isinstance(sample, Mapping) and sample.get("organ")
+        ]
+        organ = organ_values
     return DatasetRecord(
         source="HuBMAP",
         dataset_id=dataset_id,
         title=title,
         dataset_type=_text(source.get("dataset_type")),
         status=_text(source.get("status")),
-        organ=_text(source.get("organ")),
+        organ=_text(organ),
         donor_id=_text(donor_id),
-        doi_url=_text(source.get("doi_url") or source.get("doi")),
+        doi_url=_text(source.get("doi_url") or source.get("registered_doi")),
         portal_url=PORTAL_DATASET_URL.format(uuid=dataset_id) if dataset_id else None,
         raw=dict(source),
     )
