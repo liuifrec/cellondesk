@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
+from . import expression as _expression
 from . import inspection as _core
 from .inspection import H5ADInspection
 
@@ -78,17 +79,36 @@ def _axis_length(group: Any) -> int:
     return 0
 
 
+def _candidate_feature_nodes(var_group: Any) -> list[tuple[str, Any]]:
+    names = (
+        _axis_index_name(var_group),
+        "feature_name",
+        "gene_symbol",
+        "gene_symbols",
+        "gene_name",
+    )
+    result: list[tuple[str, Any]] = []
+    seen: set[str] = set()
+    for name in names:
+        if name in seen or name not in var_group:
+            continue
+        seen.add(name)
+        result.append((name, var_group[name]))
+    return result
+
+
 def install_legacy_h5ad_compatibility() -> None:
-    """Install robust dataframe metadata helpers in the shared inspector module."""
+    """Install robust dataframe metadata helpers in the shared readers."""
     _core._axis_column_names = _axis_column_names
     _core._axis_length = _axis_length
+    _expression._candidate_feature_nodes = _candidate_feature_nodes
 
 
 install_legacy_h5ad_compatibility()
 
 
 def inspect_h5ad(
-    path: str | Any,
+    path: str | Path,
     *,
     max_points: int = 5000,
     annotation: str | None = None,
@@ -106,4 +126,4 @@ def inspect_h5ad(
     )
 
 
-__all__: Iterable[str] = ("H5ADInspection", "inspect_h5ad")
+__all__ = ["H5ADInspection", "inspect_h5ad"]
