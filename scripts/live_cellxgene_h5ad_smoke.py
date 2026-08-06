@@ -7,9 +7,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from cellondesk import inspect_h5ad
 from cellondesk.expression import inspect_gene_expression
 from cellondesk.gene_report import write_gene_expression_report
-from cellondesk.inspection import inspect_h5ad
 
 SOURCE_URL = (
     "https://raw.githubusercontent.com/chanzuckerberg/cellxgene/"
