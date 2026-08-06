@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 
 from .census_report import write_census_report
+from .diagnostics import run_diagnostics
 from .expression import inspect_gene_expression
 from .gene_report import write_gene_expression_report
 from .h5ad_compat import inspect_h5ad as inspect_h5ad_file
@@ -17,6 +18,23 @@ from .sources.census import CensusQuery, preview_census_gene
 from .sources.hubmap import HuBMAPClient
 
 app = typer.Typer(help="Search, inspect, and prepare public single-cell and spatial omics data.")
+
+
+@app.command()
+def doctor(
+    json_output: Annotated[
+        Path | None,
+        typer.Option("--json", help="Write environment diagnostics as JSON"),
+    ] = None,
+) -> None:
+    report = run_diagnostics()
+    typer.echo(f"Python {report.python} on {report.platform}")
+    for check in report.checks:
+        status = "OK" if check.ok else "MISSING"
+        typer.echo(f"{status}\t{check.name}\t{check.detail}")
+    if json_output:
+        json_output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+        typer.echo(f"Wrote {json_output}")
 
 
 @app.command()
@@ -43,11 +61,7 @@ def search(
         typer.echo(f"{record.dataset_id}\t{record.dataset_type or ''}\t{record.title}")
     if json_output:
         json_output.write_text(
-            json.dumps(
-                [record.model_dump() for record in records],
-                indent=2,
-                ensure_ascii=False,
-            ),
+            json.dumps([record.model_dump() for record in records], indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
     if manifest:
@@ -68,41 +82,19 @@ def search(
 
 @app.command("inspect-h5ad")
 def inspect_h5ad_command(
-    path: Annotated[
-        Path,
-        typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True),
-    ],
-    html_report: Annotated[
-        Path | None,
-        typer.Option("--html", help="Write a self-contained local H5AD dashboard"),
-    ] = None,
-    json_output: Annotated[
-        Path | None,
-        typer.Option("--json", help="Write the structural inspection as JSON"),
-    ] = None,
-    annotation: Annotated[
-        str | None,
-        typer.Option(help="Observation column used to color embedding previews"),
-    ] = None,
-    max_points: Annotated[
-        int,
-        typer.Option(min=1, max=50000, help="Maximum sampled points per embedding"),
-    ] = 5000,
+    path: Annotated[Path, typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True)],
+    html_report: Annotated[Path | None, typer.Option("--html")] = None,
+    json_output: Annotated[Path | None, typer.Option("--json")] = None,
+    annotation: Annotated[str | None, typer.Option()] = None,
+    max_points: Annotated[int, typer.Option(min=1, max=50000)] = 5000,
 ) -> None:
-    inspection = inspect_h5ad_file(
-        path,
-        max_points=max_points,
-        annotation=annotation,
-    )
+    inspection = inspect_h5ad_file(path, max_points=max_points, annotation=annotation)
     typer.echo(
         f"{inspection.file_name}: {inspection.n_obs:,} observations x "
         f"{inspection.n_vars:,} variables; {len(inspection.embeddings)} embeddings"
     )
     if json_output:
-        json_output.write_text(
-            inspection.model_dump_json(indent=2),
-            encoding="utf-8",
-        )
+        json_output.write_text(inspection.model_dump_json(indent=2), encoding="utf-8")
     if html_report:
         write_h5ad_report(inspection, html_report)
         typer.echo(f"Wrote {html_report}")
@@ -110,27 +102,12 @@ def inspect_h5ad_command(
 
 @app.command("preview-gene")
 def preview_gene_command(
-    path: Annotated[
-        Path,
-        typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True),
-    ],
+    path: Annotated[Path, typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True)],
     gene: Annotated[str, typer.Argument(help="Gene identifier or symbol")],
-    html_report: Annotated[
-        Path,
-        typer.Option("--html", help="Write a self-contained expression dashboard"),
-    ] = Path("gene-expression.html"),
-    json_output: Annotated[
-        Path | None,
-        typer.Option("--json", help="Write sampled expression values as JSON"),
-    ] = None,
-    layer: Annotated[
-        str | None,
-        typer.Option(help="Read from a named layer instead of X"),
-    ] = None,
-    max_points: Annotated[
-        int,
-        typer.Option(min=1, max=50000, help="Maximum sampled observations"),
-    ] = 5000,
+    html_report: Annotated[Path, typer.Option("--html")] = Path("gene-expression.html"),
+    json_output: Annotated[Path | None, typer.Option("--json")] = None,
+    layer: Annotated[str | None, typer.Option()] = None,
+    max_points: Annotated[int, typer.Option(min=1, max=50000)] = 5000,
 ) -> None:
     inspection = inspect_h5ad_file(path, max_points=max_points)
     expression = inspect_gene_expression(
@@ -153,29 +130,17 @@ def preview_gene_command(
 @app.command("census-preview")
 def census_preview_command(
     gene: Annotated[str, typer.Argument(help="Exact gene symbol or feature ID")],
-    organism: Annotated[str, typer.Option(help="Census organism label")] = "Homo sapiens",
-    tissue: Annotated[str | None, typer.Option(help="Exact tissue_general value")] = None,
-    cell_type: Annotated[str | None, typer.Option(help="Exact cell_type value")] = None,
-    disease: Annotated[str | None, typer.Option(help="Exact disease value")] = None,
-    assay: Annotated[str | None, typer.Option(help="Exact assay value")] = None,
-    dataset_id: Annotated[str | None, typer.Option(help="Exact CELLxGENE dataset ID")] = None,
-    census_version: Annotated[str, typer.Option(help="Census version or stable alias")] = "stable",
-    max_cells: Annotated[
-        int,
-        typer.Option(min=1, max=50000, help="Maximum cells materialized from SOMA"),
-    ] = 5000,
-    include_non_primary: Annotated[
-        bool,
-        typer.Option("--include-non-primary", help="Include duplicated/non-primary cells"),
-    ] = False,
-    json_output: Annotated[
-        Path | None,
-        typer.Option("--json", help="Write the bounded Census preview as JSON"),
-    ] = Path("census-gene-preview.json"),
-    html_report: Annotated[
-        Path | None,
-        typer.Option("--html", help="Write a self-contained Census expression dashboard"),
-    ] = Path("census-gene-preview.html"),
+    organism: Annotated[str, typer.Option()] = "Homo sapiens",
+    tissue: Annotated[str | None, typer.Option()] = None,
+    cell_type: Annotated[str | None, typer.Option()] = None,
+    disease: Annotated[str | None, typer.Option()] = None,
+    assay: Annotated[str | None, typer.Option()] = None,
+    dataset_id: Annotated[str | None, typer.Option()] = None,
+    census_version: Annotated[str, typer.Option()] = "stable",
+    max_cells: Annotated[int, typer.Option(min=1, max=50000)] = 5000,
+    include_non_primary: Annotated[bool, typer.Option("--include-non-primary")] = False,
+    json_output: Annotated[Path | None, typer.Option("--json")] = Path("census-gene-preview.json"),
+    html_report: Annotated[Path | None, typer.Option("--html")] = Path("census-gene-preview.html"),
 ) -> None:
     result = preview_census_gene(
         CensusQuery(

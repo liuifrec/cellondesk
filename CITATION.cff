@@ -1,12 +1,21 @@
 cff-version: 1.2.0
 title: CellOnDesk
-message: "Please cite CellOnDesk and the original datasets and portals used in your analysis."
+message: "Please cite CellOnDesk and all original datasets and portals represented in your analysis."
 type: software
 authors:
   - family-names: Liu
     given-names: Yu-Chen
     alias: James Liu
+    affiliation: Radiation Effects Research Foundation
 repository-code: https://github.com/liuifrec/cellondesk
-version: 0.4.0
+url: https://github.com/liuifrec/cellondesk
+version: 0.7.0
 date-released: 2026-08-06
 license: BSD-3-Clause
+keywords:
+  - single-cell genomics
+  - spatial omics
+  - AnnData
+  - H5AD
+  - CELLxGENE Census
+  - HuBMAP

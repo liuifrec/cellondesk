@@ -30,6 +30,10 @@ class _FakeCensus:
         self.opened_version: str | None = None
         self.get_anndata_kwargs: dict[str, object] = {}
 
+    def get_census_version_description(self, requested: str) -> dict[str, str]:
+        assert requested == "stable"
+        return {"release_build": "2026-07-01"}
+
     def open_soma(self, *, census_version: str) -> _Context:
         self.opened_version = census_version
         return _Context(object())
@@ -66,7 +70,6 @@ class _FakeCensus:
                 }
             ),
             var=pd.DataFrame({"feature_id": ["ENSG1"], "feature_name": ["CD3D"]}),
-            __getitem__=lambda self, item: self,
         )
 
 
@@ -87,7 +90,7 @@ def test_filter_builders_escape_values() -> None:
     )
 
 
-def test_preview_census_gene_limits_coordinates() -> None:
+def test_preview_census_gene_limits_coordinates_and_records_provenance() -> None:
     fake = _FakeCensus()
     result = preview_census_gene(
         CensusQuery(gene="CD3D", tissue="lung", max_cells=2),
@@ -102,6 +105,11 @@ def test_preview_census_gene_limits_coordinates() -> None:
     assert result.matched_gene == "CD3D"
     assert result.feature_id == "ENSG1"
     assert result.values == [0.0, 3.0]
+    assert result.requested_census_version == "stable"
+    assert result.resolved_census_version == "2026-07-01"
+    assert result.generated_at_utc
+    assert result.cellondesk_version == "0.7.0"
+    assert result.dataset_citations[0].dataset_id == "d1"
     assert result.warnings
 
 

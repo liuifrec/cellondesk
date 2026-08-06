@@ -35,12 +35,16 @@ def render_census_report(
             for label, count in _top_counts(preview.cell_metadata, field)
         ) or '<tr><td colspan="2">No metadata available</td></tr>'
         breakdowns.append(f"<section><h3>{_escape(field)}</h3><table>{rows}</table></section>")
+    citation_rows = "".join(
+        f"<tr><td><code>{_escape(item.dataset_id)}</code></td><td>{_escape(item.citation or 'Citation unavailable; use the dataset ID to retrieve source attribution.')}</td></tr>"
+        for item in preview.dataset_citations
+    ) or '<tr><td colspan="2">No contributing dataset IDs were recorded.</td></tr>'
     warnings = "".join(f"<li>{_escape(item)}</li>" for item in preview.warnings) or "<li>No warnings.</li>"
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{_escape(title)}</title>
 <style>
-:root{{--ink:#23313a;--muted:#65737d;--line:#d8e0e5;--bg:#f4f6f8;--accent:#167f9c;--warn:#e9a23b}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}header{{padding:24px 30px;background:#253942;color:#fff}}header h1{{margin:0}}header p{{margin:5px 0 0;color:#ced9dd}}main{{max-width:1300px;margin:auto;padding:24px}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}}.card{{background:#fff;border:1px solid var(--line);border-radius:7px;padding:18px;margin-bottom:16px}}.metric strong{{display:block;font-size:27px;color:var(--accent)}}.metric span,.muted{{color:var(--muted)}}canvas{{width:100%;height:320px;border:1px solid var(--line);background:#fff}}table{{width:100%;border-collapse:collapse}}th,td{{text-align:left;padding:8px;border-bottom:1px solid #e5eaed}}th{{color:var(--muted);width:210px}}.breakdowns{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}}.warning{{border-left:5px solid var(--warn)}}code{{word-break:break-all}}</style></head>
-<body><header><h1>{_escape(title)}</h1><p>{_escape(preview.matched_gene)} · CELLxGENE Census { _escape(preview.query.census_version) } · bounded SOMA retrieval</p></header><main>
+:root{{--ink:#23313a;--muted:#65737d;--line:#d8e0e5;--bg:#f4f6f8;--accent:#167f9c;--warn:#e9a23b}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}header{{padding:24px 30px;background:#253942;color:#fff}}header h1{{margin:0}}header p{{margin:5px 0 0;color:#ced9dd}}main{{max-width:1300px;margin:auto;padding:24px}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}}.card{{background:#fff;border:1px solid var(--line);border-radius:7px;padding:18px;margin-bottom:16px}}.metric strong{{display:block;font-size:27px;color:var(--accent)}}.metric span,.muted{{color:var(--muted)}}canvas{{width:100%;height:320px;border:1px solid var(--line);background:#fff}}table{{width:100%;border-collapse:collapse}}th,td{{text-align:left;padding:8px;border-bottom:1px solid #e5eaed;vertical-align:top}}th{{color:var(--muted);width:210px}}.breakdowns{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}}.warning{{border-left:5px solid var(--warn)}}code{{word-break:break-all}}</style></head>
+<body><header><h1>{_escape(title)}</h1><p>{_escape(preview.matched_gene)} · CELLxGENE Census {_escape(preview.resolved_census_version or preview.query.census_version)} · bounded SOMA retrieval</p></header><main>
 <div class="grid">
 <div class="card metric"><strong>{preview.total_matching_cells:,}</strong><span>Matching cells</span></div>
 <div class="card metric"><strong>{preview.sampled_cells:,}</strong><span>Materialized cells</span></div>
@@ -50,7 +54,8 @@ def render_census_report(
 </div>
 <div class="card"><h2>Expression distribution</h2><canvas id="histogram" width="1100" height="320"></canvas><p class="muted">Histogram of the bounded expression slice. Zero values are retained.</p></div>
 <div class="card"><h2>Metadata composition</h2><div class="breakdowns">{''.join(breakdowns)}</div></div>
-<div class="card"><h2>Query provenance</h2><table>{query_rows}<tr><th>Matched feature</th><td>{_escape(preview.matched_gene)}</td></tr><tr><th>Feature ID</th><td>{_escape(preview.feature_id or '—')}</td></tr></table></div>
+<div class="card"><h2>Reproducibility provenance</h2><table>{query_rows}<tr><th>Resolved Census build</th><td>{_escape(preview.resolved_census_version or '—')}</td></tr><tr><th>CellOnDesk version</th><td>{_escape(preview.cellondesk_version or '—')}</td></tr><tr><th>Generated UTC</th><td>{_escape(preview.generated_at_utc or '—')}</td></tr><tr><th>Matched feature</th><td>{_escape(preview.matched_gene)}</td></tr><tr><th>Feature ID</th><td>{_escape(preview.feature_id or '—')}</td></tr></table></div>
+<div class="card"><h2>Contributing dataset citations</h2><table><tr><th>Dataset ID</th><th>Citation</th></tr>{citation_rows}</table><p class="muted">Cite CellOnDesk separately from the original datasets represented in this slice.</p></div>
 <div class="card warning"><h2>Notes</h2><ul>{warnings}</ul></div>
 </main><script type="application/json" id="report-data">{payload}</script><script>
 const data=JSON.parse(document.getElementById('report-data').textContent),canvas=document.getElementById('histogram'),ctx=canvas.getContext('2d');
