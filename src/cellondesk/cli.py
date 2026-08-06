@@ -8,8 +8,8 @@ import typer
 
 from .expression import inspect_gene_expression
 from .gene_report import write_gene_expression_report
+from .h5ad_compat import inspect_h5ad as inspect_h5ad_file
 from .h5ad_report import write_h5ad_report
-from .inspection import inspect_h5ad as inspect_h5ad_file
 from .manifest import write_hubmap_manifest
 from .report import write_html_report
 from .sources.hubmap import HuBMAPClient
