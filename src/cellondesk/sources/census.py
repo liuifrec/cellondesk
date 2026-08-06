@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -18,6 +20,11 @@ class CensusQuery(BaseModel):
     max_cells: int = Field(default=5000, ge=1, le=50000)
 
 
+class DatasetCitation(BaseModel):
+    dataset_id: str
+    citation: str | None = None
+
+
 class CensusGenePreview(BaseModel):
     query: CensusQuery
     matched_gene: str
@@ -31,6 +38,11 @@ class CensusGenePreview(BaseModel):
     p95: float | None = None
     cell_metadata: list[dict[str, Any]] = Field(default_factory=list)
     values: list[float] = Field(default_factory=list)
+    requested_census_version: str | None = None
+    resolved_census_version: str | None = None
+    generated_at_utc: str | None = None
+    cellondesk_version: str | None = None
+    dataset_citations: list[DatasetCitation] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -89,16 +101,55 @@ def _to_records(frame: Any, columns: list[str]) -> list[dict[str, Any]]:
     return records
 
 
+def _cellondesk_version() -> str:
+    try:
+        return version("cellondesk")
+    except PackageNotFoundError:  # pragma: no cover - source checkout
+        return "0.7.0"
+
+
+def _resolve_census_version(census: Any, requested: str) -> str:
+    describe = getattr(census, "get_census_version_description", None)
+    if describe is None:
+        return requested
+    try:
+        description = describe(requested)
+    except Exception:  # pragma: no cover - remote metadata failure
+        return requested
+    if isinstance(description, dict):
+        for key in ("release_build", "release_date", "census_version"):
+            value = description.get(key)
+            if value:
+                return str(value)
+    return requested
+
+
+def _dataset_citations(census_object: Any, dataset_ids: list[str]) -> list[DatasetCitation]:
+    unique_ids = sorted(set(dataset_ids))
+    if not unique_ids:
+        return []
+    try:
+        table = census_object["census_info"]["datasets"]
+        frame = table.read(column_names=["dataset_id", "citation"]).concat().to_pandas()
+        citations = {
+            str(row["dataset_id"]): str(row["citation"])
+            for _, row in frame.iterrows()
+            if row.get("citation")
+        }
+    except Exception:  # pragma: no cover - schema/API compatibility fallback
+        citations = {}
+    return [
+        DatasetCitation(dataset_id=dataset_id, citation=citations.get(dataset_id))
+        for dataset_id in unique_ids
+    ]
+
+
 def preview_census_gene(
     query: CensusQuery,
     *,
     census_module: Any | None = None,
 ) -> CensusGenePreview:
-    """Retrieve a bounded single-gene slice from CELLxGENE Census.
-
-    Cell metadata is filtered remotely first. Only the first ``max_cells`` matching
-    SOMA coordinates and one requested feature are then materialized as AnnData.
-    """
+    """Retrieve a bounded, provenance-rich single-gene slice from CELLxGENE Census."""
     census = census_module or _require_census()
     obs_filter = build_obs_value_filter(query)
     var_filter = build_var_value_filter(query.gene)
@@ -110,6 +161,7 @@ def preview_census_gene(
         "assay",
         "dataset_id",
     ]
+    resolved_version = _resolve_census_version(census, query.census_version)
 
     with census.open_soma(census_version=query.census_version) as census_object:
         obs = census.get_obs(
@@ -135,6 +187,8 @@ def preview_census_gene(
             obs_column_names=obs_columns,
             var_column_names=["feature_id", "feature_name"],
         )
+        dataset_ids = [str(value) for value in adata.obs.get("dataset_id", [])]
+        citations = _dataset_citations(census_object, dataset_ids)
 
     if int(adata.n_vars) < 1:
         raise ValueError(f"Gene {query.gene!r} was not found in CELLxGENE Census.")
@@ -163,6 +217,11 @@ def preview_census_gene(
         warnings.append(
             f"Preview limited to the first {sampled:,} of {total:,} matching cells."
         )
+    if any(item.citation is None for item in citations):
+        warnings.append(
+            "Some contributing Census datasets did not expose a citation string; "
+            "their dataset IDs are retained for manual attribution."
+        )
 
     metadata_columns = [column for column in obs_columns if column in adata.obs.columns]
     metadata = _to_records(adata.obs, metadata_columns)
@@ -179,6 +238,11 @@ def preview_census_gene(
         p95=float(np.percentile(finite, 95)) if finite.size else None,
         cell_metadata=metadata,
         values=[float(value) for value in values],
+        requested_census_version=query.census_version,
+        resolved_census_version=resolved_version,
+        generated_at_utc=datetime.now(UTC).isoformat(),
+        cellondesk_version=_cellondesk_version(),
+        dataset_citations=citations,
         warnings=warnings,
     )
 
@@ -186,6 +250,7 @@ def preview_census_gene(
 __all__ = [
     "CensusGenePreview",
     "CensusQuery",
+    "DatasetCitation",
     "build_obs_value_filter",
     "build_var_value_filter",
     "preview_census_gene",
