@@ -108,7 +108,7 @@ def test_preview_census_gene_limits_coordinates_and_records_provenance() -> None
     assert result.requested_census_version == "stable"
     assert result.resolved_census_version == "2026-07-01"
     assert result.generated_at_utc
-    assert result.cellondesk_version == "0.7.0"
+    assert result.cellondesk_version == "0.8.0"
     assert result.dataset_citations[0].dataset_id == "d1"
     assert result.warnings
 
