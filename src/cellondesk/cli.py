@@ -6,11 +6,13 @@ from typing import Annotated
 
 import typer
 
+from .h5ad_report import write_h5ad_report
+from .inspection import inspect_h5ad as inspect_h5ad_file
 from .manifest import write_hubmap_manifest
 from .report import write_html_report
 from .sources.hubmap import HuBMAPClient
 
-app = typer.Typer(help="Search and prepare public single-cell and spatial omics datasets.")
+app = typer.Typer(help="Search, inspect, and prepare public single-cell and spatial omics data.")
 
 
 @app.command()
@@ -27,13 +29,21 @@ def search(
     ] = None,
 ) -> None:
     with HuBMAPClient() as client:
-        records = client.search_datasets(dataset_type=dataset_type, organ=organ,
-                                         status=status, limit=limit)
+        records = client.search_datasets(
+            dataset_type=dataset_type,
+            organ=organ,
+            status=status,
+            limit=limit,
+        )
     for record in records:
         typer.echo(f"{record.dataset_id}\t{record.dataset_type or ''}\t{record.title}")
     if json_output:
         json_output.write_text(
-            json.dumps([r.model_dump() for r in records], indent=2, ensure_ascii=False),
+            json.dumps(
+                [record.model_dump() for record in records],
+                indent=2,
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
     if manifest:
@@ -50,3 +60,45 @@ def search(
                 "limit": limit,
             },
         )
+
+
+@app.command("inspect-h5ad")
+def inspect_h5ad_command(
+    path: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True),
+    ],
+    html_report: Annotated[
+        Path | None,
+        typer.Option("--html", help="Write a self-contained local H5AD dashboard"),
+    ] = None,
+    json_output: Annotated[
+        Path | None,
+        typer.Option("--json", help="Write the structural inspection as JSON"),
+    ] = None,
+    annotation: Annotated[
+        str | None,
+        typer.Option(help="Observation column used to color embedding previews"),
+    ] = None,
+    max_points: Annotated[
+        int,
+        typer.Option(min=1, max=50000, help="Maximum sampled points per embedding"),
+    ] = 5000,
+) -> None:
+    inspection = inspect_h5ad_file(
+        path,
+        max_points=max_points,
+        annotation=annotation,
+    )
+    typer.echo(
+        f"{inspection.file_name}: {inspection.n_obs:,} observations x "
+        f"{inspection.n_vars:,} variables; {len(inspection.embeddings)} embeddings"
+    )
+    if json_output:
+        json_output.write_text(
+            inspection.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+    if html_report:
+        write_h5ad_report(inspection, html_report)
+        typer.echo(f"Wrote {html_report}")
