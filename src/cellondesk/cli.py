@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 
 from .manifest import write_hubmap_manifest
+from .report import write_html_report
 from .sources.hubmap import HuBMAPClient
 
 app = typer.Typer(help="Search and prepare public single-cell and spatial omics datasets.")
@@ -20,6 +21,10 @@ def search(
     limit: Annotated[int, typer.Option(min=1, max=1000)] = 50,
     json_output: Annotated[Path | None, typer.Option("--json", help="Write normalized JSON")] = None,
     manifest: Annotated[Path | None, typer.Option(help="Write HuBMAP CLT manifest")] = None,
+    html_report: Annotated[
+        Path | None,
+        typer.Option("--html", help="Write a self-contained HTML dashboard"),
+    ] = None,
 ) -> None:
     with HuBMAPClient() as client:
         records = client.search_datasets(dataset_type=dataset_type, organ=organ,
@@ -33,3 +38,15 @@ def search(
         )
     if manifest:
         write_hubmap_manifest(records, manifest)
+    if html_report:
+        write_html_report(
+            records,
+            html_report,
+            query={
+                "source": "HuBMAP",
+                "dataset_type": dataset_type,
+                "organ": organ,
+                "status": status,
+                "limit": limit,
+            },
+        )
