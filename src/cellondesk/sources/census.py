@@ -74,11 +74,24 @@ def _require_census() -> Any:
     return cellxgene_census
 
 
+def _to_python(value: Any) -> Any:
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (TypeError, ValueError):
+            pass
+    return value
+
+
 def _to_records(frame: Any, columns: list[str]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for _, row in frame[columns].iterrows():
-        records.append({column: row[column] for column in columns})
+        records.append({column: _to_python(row[column]) for column in columns})
     return records
+
+
+def _open_census(census: Any, version: str) -> Any:
+    return census.open_soma(census_version=version)
 
 
 def preview_census_gene(
@@ -88,8 +101,8 @@ def preview_census_gene(
 ) -> CensusGenePreview:
     """Retrieve a bounded single-gene slice from CELLxGENE Census.
 
-    The function delegates filtering to the Census/SOMA service and materializes only
-    one requested feature plus selected observation metadata.
+    Cell metadata is filtered remotely first. Only the first ``max_cells`` matching
+    SOMA coordinates and one requested feature are then materialized as AnnData.
     """
     census = census_module or _require_census()
     obs_filter = build_obs_value_filter(query)
@@ -103,22 +116,40 @@ def preview_census_gene(
         "dataset_id",
     ]
 
-    adata = census.get_anndata(
-        census_version=query.census_version,
-        organism=query.organism,
-        measurement_name="RNA",
-        X_name="raw",
-        obs_value_filter=obs_filter or None,
-        var_value_filter=var_filter,
-        obs_column_names=obs_columns,
-    )
-    total = int(adata.n_obs)
+    with _open_census(census, query.census_version) as census_object:
+        obs = census.get_obs(
+            census_object,
+            query.organism,
+            value_filter=obs_filter or None,
+            column_names=obs_columns,
+        )
+        total = int(len(obs))
+        if total == 0:
+            raise ValueError("No Census cells matched the requested filters.")
+
+        sampled = min(total, query.max_cells)
+        sampled_obs = obs.iloc[:sampled].copy()
+        obs_coords = sampled_obs["soma_joinid"].tolist()
+        adata = census.get_anndata(
+            census_object,
+            organism=query.organism,
+            measurement_name="RNA",
+            X_name="raw",
+            obs_coords=obs_coords,
+            var_value_filter=var_filter,
+            obs_column_names=obs_columns,
+            var_column_names=["feature_id", "feature_name"],
+        )
+
     if int(adata.n_vars) < 1:
         raise ValueError(f"Gene {query.gene!r} was not found in CELLxGENE Census.")
+    if int(adata.n_vars) > 1:
+        raise ValueError(
+            f"Gene query {query.gene!r} matched more than one Census feature. "
+            "Use an exact feature ID."
+        )
 
-    sampled = min(total, query.max_cells)
-    subset = adata[:sampled, :1]
-    matrix = subset.X
+    matrix = adata[:, :1].X
     if hasattr(matrix, "toarray"):
         values = matrix.toarray().reshape(-1)
     else:
@@ -127,8 +158,8 @@ def preview_census_gene(
     import numpy as np
 
     values = np.asarray(values, dtype=float)
-    matched_gene = str(subset.var.iloc[0].get("feature_name", query.gene))
-    feature_id_value = subset.var.iloc[0].get("feature_id")
+    matched_gene = str(adata.var.iloc[0].get("feature_name", query.gene))
+    feature_id_value = adata.var.iloc[0].get("feature_id")
     feature_id = None if feature_id_value is None else str(feature_id_value)
     finite = values[np.isfinite(values)]
     nonzero = int(np.count_nonzero(finite))
@@ -138,14 +169,14 @@ def preview_census_gene(
             f"Preview limited to the first {sampled:,} of {total:,} matching cells."
         )
 
-    metadata_columns = [column for column in obs_columns if column in subset.obs.columns]
-    metadata = _to_records(subset.obs, metadata_columns)
+    metadata_columns = [column for column in obs_columns if column in adata.obs.columns]
+    metadata = _to_records(adata.obs, metadata_columns)
     return CensusGenePreview(
         query=query,
         matched_gene=matched_gene,
         feature_id=feature_id,
         total_matching_cells=total,
-        sampled_cells=sampled,
+        sampled_cells=int(adata.n_obs),
         nonzero_sampled=nonzero,
         minimum=float(np.min(finite)) if finite.size else None,
         maximum=float(np.max(finite)) if finite.size else None,
