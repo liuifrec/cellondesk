@@ -7,15 +7,22 @@ from .expression import GeneExpressionPreview, inspect_gene_expression
 from .h5ad_compat import H5ADInspection, inspect_h5ad
 from .models import DatasetRecord
 from .sources.census import (
+    SUPPORTED_CENSUS_VALUE_FIELDS,
     CensusGenePreview,
     CensusQuery,
+    CensusValueCount,
+    CensusValueResult,
     DatasetCitation,
+    list_census_values,
     preview_census_gene,
 )
 
 __all__ = [
+    "SUPPORTED_CENSUS_VALUE_FIELDS",
     "CensusGenePreview",
     "CensusQuery",
+    "CensusValueCount",
+    "CensusValueResult",
     "DatasetCitation",
     "DatasetRecord",
     "DiagnosticCheck",
@@ -24,9 +31,10 @@ __all__ = [
     "H5ADInspection",
     "inspect_gene_expression",
     "inspect_h5ad",
+    "list_census_values",
     "preview_census_gene",
     "render_census_report",
     "run_diagnostics",
     "write_census_report",
 ]
-__version__ = "0.7.0"
+__version__ = "0.8.0"
