@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -90,10 +89,6 @@ def _to_records(frame: Any, columns: list[str]) -> list[dict[str, Any]]:
     return records
 
 
-def _open_census(census: Any, version: str) -> Any:
-    return census.open_soma(census_version=version)
-
-
 def preview_census_gene(
     query: CensusQuery,
     *,
@@ -116,7 +111,7 @@ def preview_census_gene(
         "dataset_id",
     ]
 
-    with _open_census(census, query.census_version) as census_object:
+    with census.open_soma(census_version=query.census_version) as census_object:
         obs = census.get_obs(
             census_object,
             query.organism,
@@ -149,7 +144,7 @@ def preview_census_gene(
             "Use an exact feature ID."
         )
 
-    matrix = adata[:, :1].X
+    matrix = adata.X
     if hasattr(matrix, "toarray"):
         values = matrix.toarray().reshape(-1)
     else:
