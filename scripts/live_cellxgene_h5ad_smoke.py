@@ -11,7 +11,10 @@ from cellondesk.expression import inspect_gene_expression
 from cellondesk.gene_report import write_gene_expression_report
 from cellondesk.inspection import inspect_h5ad
 
-SOURCE_URL = "https://cellxgene-example-data.czi.technology/pbmc3k.h5ad"
+SOURCE_URL = (
+    "https://raw.githubusercontent.com/chanzuckerberg/cellxgene/"
+    "master/example-dataset/pbmc3k.h5ad"
+)
 
 
 def _download(source: Path, attempts: int = 4) -> None:
