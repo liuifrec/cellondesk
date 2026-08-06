@@ -142,6 +142,15 @@ def _candidate_feature_nodes(var_table: Any) -> list[tuple[str, Any]]:
     return result
 
 
+def _container_keys(node: Any) -> list[str]:
+    structured = _structured_names(node)
+    if structured:
+        return sorted(structured)
+    if hasattr(node, "keys"):
+        return sorted(node.keys())
+    return []
+
+
 def _embedding_previews(
     handle: Any,
     *,
@@ -154,7 +163,7 @@ def _embedding_previews(
     if "obsm" not in handle:
         return [], warnings
     obsm = handle["obsm"]
-    keys = _structured_names(obsm) or list(obsm.keys())
+    keys = _container_keys(obsm)
     priority = {"X_umap": 0, "spatial": 1, "X_tsne": 2, "X_pca": 3}
     keys.sort(key=lambda key: (priority.get(key, 10), key))
     indices = _core._sample_indices(n_obs, max_points, np)
@@ -228,14 +237,109 @@ def inspect_h5ad(
     max_obs_columns: int = 50,
     max_var_columns: int = 30,
 ) -> H5ADInspection:
-    return _core.inspect_h5ad(
-        path,
-        max_points=max_points,
-        annotation=annotation,
-        max_column_values=max_column_values,
-        max_obs_columns=max_obs_columns,
-        max_var_columns=max_var_columns,
-    )
+    """Inspect modern and legacy AnnData H5AD layouts with bounded reads."""
+    h5py, np = _core._require_data_dependencies()
+    source = Path(path).expanduser().resolve()
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if source.suffix.lower() != ".h5ad":
+        raise ValueError(f"Expected an .h5ad file, received: {source.name}")
+    if max_points < 1:
+        raise ValueError("max_points must be positive")
+
+    warnings: list[str] = []
+    with h5py.File(source, "r") as handle:
+        obs_table = handle.get("obs")
+        var_table = handle.get("var")
+        n_obs = _axis_length(obs_table) if obs_table is not None else 0
+        n_vars = _axis_length(var_table) if var_table is not None else 0
+        matrix = _core._matrix_summary(handle, n_obs, n_vars, np)
+        if not n_obs:
+            n_obs = matrix.shape[0]
+        if not n_vars:
+            n_vars = matrix.shape[1]
+
+        obs_names = _axis_column_names(obs_table) if obs_table is not None else []
+        var_names = _axis_column_names(var_table) if var_table is not None else []
+        likely_annotation = _core._choose_annotation(obs_names, annotation)
+        if annotation and likely_annotation is None:
+            warnings.append(f"Requested annotation column {annotation!r} was not found.")
+
+        selected_obs_names = obs_names[:max_obs_columns]
+        if likely_annotation and likely_annotation not in selected_obs_names:
+            selected_obs_names.append(likely_annotation)
+        obs_columns = (
+            [
+                _core._summarize_column(
+                    name,
+                    _field(obs_table, name),
+                    max_values=max_column_values,
+                    max_top_values=12,
+                    np=np,
+                )
+                for name in selected_obs_names
+                if _contains_field(obs_table, name)
+            ]
+            if obs_table is not None
+            else []
+        )
+        var_columns = (
+            [
+                _core._summarize_column(
+                    name,
+                    _field(var_table, name),
+                    max_values=max_column_values,
+                    max_top_values=12,
+                    np=np,
+                )
+                for name in var_names[:max_var_columns]
+                if _contains_field(var_table, name)
+            ]
+            if var_table is not None
+            else []
+        )
+
+        embeddings, embedding_warnings = _embedding_previews(
+            handle,
+            n_obs=n_obs,
+            annotation=likely_annotation,
+            max_points=max_points,
+            np=np,
+        )
+        warnings.extend(embedding_warnings)
+
+        if len(obs_names) > max_obs_columns:
+            warnings.append(
+                f"Detailed summaries were limited to {max_obs_columns} of "
+                f"{len(obs_names)} obs columns."
+            )
+        if len(var_names) > max_var_columns:
+            warnings.append(
+                f"Detailed summaries were limited to {max_var_columns} of "
+                f"{len(var_names)} var columns."
+            )
+        if not embeddings:
+            warnings.append("No two-dimensional previewable embedding was found in obsm.")
+
+        return H5ADInspection(
+            source_path=str(source),
+            file_name=source.name,
+            file_size_bytes=source.stat().st_size,
+            n_obs=n_obs,
+            n_vars=n_vars,
+            matrix=matrix,
+            obs_column_names=obs_names,
+            var_column_names=var_names,
+            obs_columns=obs_columns,
+            var_columns=var_columns,
+            layers=_container_keys(handle["layers"]) if "layers" in handle else [],
+            obsm=_container_keys(handle["obsm"]) if "obsm" in handle else [],
+            uns=_container_keys(handle["uns"]) if "uns" in handle else [],
+            has_raw="raw" in handle,
+            likely_annotation=likely_annotation,
+            embeddings=embeddings,
+            warnings=warnings,
+        )
 
 
 __all__ = ["H5ADInspection", "inspect_h5ad"]
