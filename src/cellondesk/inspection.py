@@ -139,7 +139,7 @@ def _axis_column_names(group: Any) -> list[str]:
     index_name = str(_decode_scalar(group.attrs.get("_index", "_index")))
     return sorted(
         key
-        for key in group.keys()
+        for key in group
         if key not in {index_name, "__categories"} and not key.startswith("_")
     )
 
@@ -253,7 +253,7 @@ def _summarize_column(
             encoding=encoding,
             sampled=sampled,
             non_null=non_null,
-            unique=int(len(set(numeric_values))),
+            unique=len(set(numeric_values)),
             numeric=numeric_summary,
         )
 
