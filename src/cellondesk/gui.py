@@ -4,19 +4,34 @@ import json
 import sys
 from pathlib import Path
 
+import httpx
+
 from .manifest import write_hubmap_manifest
 from .models import DatasetRecord
 from .report import write_html_report
-from .sources.hubmap import HuBMAPClient, SPATIAL_DATASET_TYPES
+from .sources.hubmap import SPATIAL_DATASET_TYPES, HuBMAPClient
 
 
 def main() -> None:
     try:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
-            QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-            QMainWindow, QMessageBox, QPushButton, QSpinBox, QSplitter, QTableWidget,
-            QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
+            QApplication,
+            QComboBox,
+            QFileDialog,
+            QHBoxLayout,
+            QLabel,
+            QLineEdit,
+            QMainWindow,
+            QMessageBox,
+            QPushButton,
+            QSpinBox,
+            QSplitter,
+            QTableWidget,
+            QTableWidgetItem,
+            QTextEdit,
+            QVBoxLayout,
+            QWidget,
         )
     except ImportError as exc:
         raise SystemExit('Install GUI dependencies with: pip install "cellondesk[gui]"') from exc
@@ -43,14 +58,23 @@ def main() -> None:
             manifest_button = QPushButton("Export CLT manifest")
             report_button = QPushButton("Export HTML summary")
             for widget in (
-                QLabel("Assay"), self.dataset_type, QLabel("Organ"), self.organ,
-                QLabel("Limit"), self.limit, search_button, manifest_button, report_button,
+                QLabel("Assay"),
+                self.dataset_type,
+                QLabel("Organ"),
+                self.organ,
+                QLabel("Limit"),
+                self.limit,
+                search_button,
+                manifest_button,
+                report_button,
             ):
                 controls.addWidget(widget)
             layout.addLayout(controls)
             splitter = QSplitter(Qt.Orientation.Vertical)
             self.table = QTableWidget(0, 5)
-            self.table.setHorizontalHeaderLabels(["HuBMAP ID", "Type", "Organ", "Status", "Title"])
+            self.table.setHorizontalHeaderLabels(
+                ["HuBMAP ID", "Type", "Organ", "Status", "Title"]
+            )
             self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
             self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
             self.details = QTextEdit()
@@ -73,13 +97,18 @@ def main() -> None:
                         status="Published",
                         limit=self.limit.value(),
                     )
-            except Exception as exc:
+            except (httpx.HTTPError, ValueError) as exc:
                 QMessageBox.critical(self, "HuBMAP search failed", str(exc))
                 return
             self.table.setRowCount(len(self.records))
             for row, record in enumerate(self.records):
-                values = [record.dataset_id, record.dataset_type or "", record.organ or "",
-                          record.status or "", record.title]
+                values = [
+                    record.dataset_id,
+                    record.dataset_type or "",
+                    record.organ or "",
+                    record.status or "",
+                    record.title,
+                ]
                 for col, value in enumerate(values):
                     self.table.setItem(row, col, QTableWidgetItem(value))
             self.table.resizeColumnsToContents()
@@ -94,7 +123,11 @@ def main() -> None:
                 QMessageBox.information(self, "Nothing to export", "Run a search first.")
                 return
             filename, _ = QFileDialog.getSaveFileName(
-                self, "Export HuBMAP CLT manifest", "hubmap-manifest.txt", "Text files (*.txt)")
+                self,
+                "Export HuBMAP CLT manifest",
+                "hubmap-manifest.txt",
+                "Text files (*.txt)",
+            )
             if filename:
                 write_hubmap_manifest(self.selected_records(), Path(filename))
                 self.statusBar().showMessage(f"Wrote {filename}")
@@ -104,10 +137,15 @@ def main() -> None:
                 QMessageBox.information(self, "Nothing to export", "Run a search first.")
                 return
             filename, _ = QFileDialog.getSaveFileName(
-                self, "Export CellOnDesk HTML summary", "web_summary.html", "HTML files (*.html)")
+                self,
+                "Export CellOnDesk HTML summary",
+                "web_summary.html",
+                "HTML files (*.html)",
+            )
             if filename:
                 write_html_report(
-                    self.selected_records(), Path(filename),
+                    self.selected_records(),
+                    Path(filename),
                     query={
                         "source": "HuBMAP",
                         "dataset_type": self.dataset_type.currentText().strip() or None,
@@ -121,8 +159,13 @@ def main() -> None:
         def show_details(self) -> None:
             rows = sorted({index.row() for index in self.table.selectedIndexes()})
             if rows:
-                self.details.setPlainText(json.dumps(
-                    self.records[rows[0]].model_dump(), indent=2, ensure_ascii=False))
+                self.details.setPlainText(
+                    json.dumps(
+                        self.records[rows[0]].model_dump(),
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
             else:
                 self.details.clear()
 
