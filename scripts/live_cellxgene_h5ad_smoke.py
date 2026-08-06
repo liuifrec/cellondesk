@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -12,11 +14,33 @@ from cellondesk.inspection import inspect_h5ad
 SOURCE_URL = "https://cellxgene-example-data.czi.technology/pbmc3k.h5ad"
 
 
+def _download(source: Path, attempts: int = 4) -> None:
+    request = urllib.request.Request(
+        SOURCE_URL,
+        headers={"User-Agent": "CellOnDesk-live-validation/0.4"},
+    )
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                source.write_bytes(response.read())
+            if source.stat().st_size < 1_000_000:
+                raise RuntimeError("Downloaded H5AD is unexpectedly small")
+            return
+        except (OSError, RuntimeError, urllib.error.URLError) as exc:
+            last_error = exc
+            if source.exists():
+                source.unlink()
+            if attempt < attempts:
+                time.sleep(5 * attempt)
+    raise RuntimeError(f"Could not download public H5AD after {attempts} attempts") from last_error
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         source = Path(tmpdir) / "pbmc3k.h5ad"
         report_path = Path(tmpdir) / "pbmc3k-cd3d.html"
-        urllib.request.urlretrieve(SOURCE_URL, source)
+        _download(source)
 
         inspection = inspect_h5ad(source, max_points=1000)
         expression = inspect_gene_expression(
