@@ -6,6 +6,18 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+SUPPORTED_CENSUS_VALUE_FIELDS = (
+    "assay",
+    "cell_type",
+    "development_stage",
+    "disease",
+    "self_reported_ethnicity",
+    "sex",
+    "suspension_type",
+    "tissue",
+    "tissue_general",
+)
+
 
 class CensusQuery(BaseModel):
     organism: str = "Homo sapiens"
@@ -44,6 +56,24 @@ class CensusGenePreview(BaseModel):
     cellondesk_version: str | None = None
     dataset_citations: list[DatasetCitation] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class CensusValueCount(BaseModel):
+    label: str
+    ontology_term_id: str | None = None
+    total_cell_count: int
+    unique_cell_count: int | None = None
+
+
+class CensusValueResult(BaseModel):
+    field: str
+    organism: str
+    contains: str | None = None
+    requested_census_version: str
+    resolved_census_version: str
+    generated_at_utc: str
+    cellondesk_version: str
+    values: list[CensusValueCount] = Field(default_factory=list)
 
 
 def _quote(value: str) -> str:
@@ -101,11 +131,31 @@ def _to_records(frame: Any, columns: list[str]) -> list[dict[str, Any]]:
     return records
 
 
+def _optional_text(value: Any) -> str | None:
+    value = _to_python(value)
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "<na>"}:
+        return None
+    return text
+
+
+def _optional_int(value: Any) -> int | None:
+    value = _to_python(value)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _cellondesk_version() -> str:
     try:
         return version("cellondesk")
     except PackageNotFoundError:  # pragma: no cover - source checkout
-        return "0.7.0"
+        return "0.8.0"
 
 
 def _resolve_census_version(census: Any, requested: str) -> str:
@@ -114,7 +164,7 @@ def _resolve_census_version(census: Any, requested: str) -> str:
         return requested
     try:
         description = describe(requested)
-    except Exception:  # pragma: no cover - remote metadata failure
+    except Exception:  # noqa: BLE001  # pragma: no cover - optional remote metadata
         return requested
     if isinstance(description, dict):
         for key in ("release_build", "release_date", "census_version"):
@@ -136,12 +186,76 @@ def _dataset_citations(census_object: Any, dataset_ids: list[str]) -> list[Datas
             for _, row in frame.iterrows()
             if row.get("citation")
         }
-    except Exception:  # pragma: no cover - schema/API compatibility fallback
+    except Exception:  # noqa: BLE001  # pragma: no cover - schema compatibility fallback
         citations = {}
     return [
         DatasetCitation(dataset_id=dataset_id, citation=citations.get(dataset_id))
         for dataset_id in unique_ids
     ]
+
+
+def list_census_values(
+    field: str,
+    *,
+    organism: str = "Homo sapiens",
+    contains: str | None = None,
+    census_version: str = "stable",
+    limit: int = 50,
+    census_module: Any | None = None,
+) -> CensusValueResult:
+    """List common Census metadata labels from the precomputed summary count table."""
+    field = field.strip()
+    if field not in SUPPORTED_CENSUS_VALUE_FIELDS:
+        supported = ", ".join(SUPPORTED_CENSUS_VALUE_FIELDS)
+        raise ValueError(f"Unsupported Census field {field!r}. Choose one of: {supported}.")
+    if not 1 <= limit <= 500:
+        raise ValueError("limit must be between 1 and 500")
+
+    census = census_module or _require_census()
+    resolved_version = _resolve_census_version(census, census_version)
+    with census.open_soma(census_version=census_version) as census_object:
+        table = census_object["census_info"]["summary_cell_counts"]
+        frame = table.read().concat().to_pandas()
+
+    required = {"organism", "category", "label", "total_cell_count"}
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise RuntimeError(
+            "Census summary count table is missing required columns: " + ", ".join(missing)
+        )
+
+    subset = frame.loc[
+        (frame["organism"].astype(str) == organism)
+        & (frame["category"].astype(str) == field)
+    ].copy()
+    if contains:
+        subset = subset.loc[
+            subset["label"].astype(str).str.contains(contains, case=False, regex=False, na=False)
+        ]
+    subset = subset.sort_values(
+        ["total_cell_count", "label"],
+        ascending=[False, True],
+    ).head(limit)
+
+    values = [
+        CensusValueCount(
+            label=str(row["label"]),
+            ontology_term_id=_optional_text(row.get("ontology_term_id")),
+            total_cell_count=int(row["total_cell_count"]),
+            unique_cell_count=_optional_int(row.get("unique_cell_count")),
+        )
+        for _, row in subset.iterrows()
+    ]
+    return CensusValueResult(
+        field=field,
+        organism=organism,
+        contains=contains,
+        requested_census_version=census_version,
+        resolved_census_version=resolved_version,
+        generated_at_utc=datetime.now(UTC).isoformat(),
+        cellondesk_version=_cellondesk_version(),
+        values=values,
+    )
 
 
 def preview_census_gene(
@@ -170,7 +284,7 @@ def preview_census_gene(
             value_filter=obs_filter or None,
             column_names=obs_columns,
         )
-        total = int(len(obs))
+        total = len(obs)
         if total == 0:
             raise ValueError("No Census cells matched the requested filters.")
 
@@ -248,10 +362,14 @@ def preview_census_gene(
 
 
 __all__ = [
+    "SUPPORTED_CENSUS_VALUE_FIELDS",
     "CensusGenePreview",
     "CensusQuery",
+    "CensusValueCount",
+    "CensusValueResult",
     "DatasetCitation",
     "build_obs_value_filter",
     "build_var_value_filter",
+    "list_census_values",
     "preview_census_gene",
 ]
