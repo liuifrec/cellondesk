@@ -1,7 +1,7 @@
 """CellOnDesk public API."""
 
 from .expression import GeneExpressionPreview, inspect_gene_expression
-from .inspection import H5ADInspection, inspect_h5ad
+from .h5ad_compat import H5ADInspection, inspect_h5ad
 from .models import DatasetRecord
 
 __all__ = [
