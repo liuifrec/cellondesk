@@ -12,6 +12,7 @@ def test_report_is_self_contained_and_escapes_content():
         dataset_type="Visium (no probes)",
         organ="LK",
         status="Published",
+        access_level="protected",
         portal_url="https://example.org/dataset/abc",
     )
     output = render_html_report([record], query={"organ": "LK"})
@@ -19,7 +20,9 @@ def test_report_is_self_contained_and_escapes_content():
     assert "Kidney &lt;script&gt;alert(1)&lt;/script&gt;" in output
     assert "https://example.org/dataset/abc" in output
     assert "cdn." not in output
-    assert "1 public dataset records" in output
+    assert "1 dataset records" in output
+    assert "protected" in output
+    assert "1 public dataset records" not in output
 
 
 def test_report_writes_html_file(tmp_path: Path):

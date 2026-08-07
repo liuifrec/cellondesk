@@ -2,22 +2,34 @@
 
 **CellOnDesk** is a local-first browser and command-line toolkit for discovering public single-cell and spatial-omics datasets, inspecting large local H5AD files with bounded memory, and producing portable offline review reports.
 
-> **Status:** technical alpha (`0.10.0` internal Windows desktop preview). CLI workflows are suitable for regular internal exploratory use. The Windows installer is validated in CI; real-machine desktop testing, public release hardening, and broader real-dataset validation are still in progress.
+> **Status:** technical alpha (`0.11.0` internal Windows desktop preview). The desktop now exposes HuBMAP, UCSC Cell Browser, CELLxGENE entry points, and local H5AD inspection. Real-machine testing, source-vocabulary validation, public release hardening, and broader real-dataset validation are still in progress.
 
 ## Current capabilities
 
-- Search published HuBMAP datasets and export source-native transfer manifests.
-- Produce self-contained HuBMAP metadata dashboards.
+- Search published HuBMAP datasets with friendly organ aliases such as `kidney` as well as source-native codes such as `LK` and `RK`.
+- Show HuBMAP publication status separately from reported data access level, open selected records in the portal, and export CLT transfer manifests or self-contained HTML summaries.
+- Search the public UCSC Cell Browser catalog by keyword, organ, and organism, then open the selected dataset at its browser/download page.
+- Expose CELLxGENE Discover from the Windows desktop and retain optional native CELLxGENE Census/SOMA bounded gene previews when the Census dependency is installed.
 - Inspect local H5AD structure without loading the full expression matrix.
 - Preview sampled embeddings and one selected gene from dense, CSR, or CSC AnnData matrices.
-- Discover exact CELLxGENE Census metadata labels and precomputed cell counts.
-- Query one exact gene from CELLxGENE Census/SOMA with bounded cell materialization.
-- Export Census JSON and offline HTML reports with resolved Census provenance and contributing dataset attribution.
+- Discover exact CELLxGENE Census metadata labels and precomputed cell counts from Python environments with Census support.
+- Query one exact gene from CELLxGENE Census/SOMA with bounded cell materialization and export provenance-rich JSON or offline HTML reports.
 - Run on Python 3.10+; CI covers Ubuntu, Windows, and macOS and validates a rebuilt wheel.
 
 CellOnDesk is a preview and review tool. It does not replace Scanpy/scverse workflows for clustering, differential expression, integration, trajectory analysis, or statistical inference.
 
-## Install for routine use
+## Windows desktop preview
+
+The Windows installer is designed for per-user installation without requiring Python, Git, or administrator privileges. The current desktop has four workspaces:
+
+1. **HuBMAP** — search, inspect access metadata, open selected records, export CLT manifests, and export HTML search summaries.
+2. **CELLxGENE** — open CELLxGENE Discover for dataset search/download; when `cellxgene-census` is available, run bounded Census gene previews directly.
+3. **UCSC Cell Browser** — search the public catalog and open a selected dataset at its browser/download page.
+4. **Local H5AD** — inspect real AnnData files with bounded memory and export HTML/JSON structural reports.
+
+The packaged native Windows preview intentionally does **not** bundle `cellxgene-census` because the SOMA dependency stack is not a normal native-Windows deployment target. The CELLxGENE tab therefore remains visible and useful: use **Open CELLxGENE Discover** to search/download an H5AD, then inspect that file in **Local H5AD**. Native Census controls activate automatically in environments where the optional Census dependency is available.
+
+## Install for routine Python use
 
 ```bash
 python -m venv .venv
@@ -40,6 +52,8 @@ pip install -e ".[gui,data]"   # desktop GUI plus local H5AD support
 
 ## HuBMAP discovery
 
+The Python/CLI interface accepts the source-native filters, while the desktop additionally resolves common friendly aliases. For example, desktop organ `kidney` searches both left (`LK`) and right (`RK`) kidney records.
+
 ```bash
 cellondesk search \
   --dataset-type CODEX \
@@ -51,6 +65,14 @@ cellondesk search \
   --html hubmap-search.html
 ```
 
+A CLT manifest describes transfer targets; it is **not** itself the dataset. In the desktop, **Get data / transfer** opens the current HuBMAP dataset page so the portal can show the live access/download options and any authorization requirements.
+
+## UCSC Cell Browser discovery
+
+The desktop adapter reads the public Cell Browser catalog and expands matching collections one level to find datasets. Use ordinary search terms such as `kidney`, an organism such as `Human`, or project/assay keywords. Opening a result takes you to the UCSC Cell Browser dataset page, where the portal exposes its current **Info & Download / Data Download** options.
+
+This adapter is intentionally conservative during the alpha: it does not scrape or guess direct matrix URLs when the portal does not advertise them in the catalog metadata.
+
 ## Inspect a local H5AD file
 
 ```bash
@@ -60,6 +82,8 @@ cellondesk inspect-h5ad path/to/expr.h5ad \
   --html expr-summary.html \
   --json expr-summary.json
 ```
+
+The inspector tolerates many real-world AnnData layouts and prefers exact annotation-name matches before case-insensitive fallbacks, which helps when messy files contain several fields such as `cell_type`, `Cell_type`, and `Cell_Type`.
 
 ## Preview one local gene
 
@@ -123,9 +147,9 @@ python -m twine check dist/*
 
 ## Citation
 
-Use [`CITATION.cff`](CITATION.cff) for the software citation. Census reports list contributing source datasets represented in each bounded slice; those original datasets and associated publications must be cited separately.
+Use [`CITATION.cff`](CITATION.cff) for the software citation. Portal reports preserve source metadata/provenance; original datasets and associated publications must be cited separately.
 
-An archived DOI-backed release is planned after the release candidate passes the real-data validation checklist.
+An archived DOI-backed public release is planned after the desktop preview passes the real-data validation checklist.
 
 ## License
 

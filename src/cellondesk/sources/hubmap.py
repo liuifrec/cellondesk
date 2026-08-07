@@ -20,7 +20,50 @@ SPATIAL_DATASET_TYPES = (
     "MIBI",
     "IMC",
     "MALDI IMS",
+    "scRNA-seq / snRNA-seq",
 )
+
+# HuBMAP exposes compact organ codes in its search index. Keep the API codes in
+# one place so desktop users can search with ordinary anatomical names.
+ORGAN_ALIASES: dict[str, tuple[str, ...]] = {
+    "kidney": ("LK", "RK"),
+    "left kidney": ("LK",),
+    "kidney left": ("LK",),
+    "right kidney": ("RK",),
+    "kidney right": ("RK",),
+    "spleen": ("SP",),
+}
+
+# A friendly label can map to several HuBMAP dataset_type values. Exact values
+# are still accepted unchanged, which keeps this adapter compatible with new
+# assay names appearing in the portal.
+ASSAY_ALIASES: dict[str, tuple[str, ...]] = {
+    "scrna-seq / snrna-seq": (
+        "RNAseq",
+        "scRNA-seq",
+        "snRNA-seq",
+        "snRNAseq",
+    ),
+    "scrna-seq": ("RNAseq", "scRNA-seq"),
+    "snrna-seq": ("snRNA-seq", "snRNAseq"),
+    "merfish": ("MERFISH", "MERFISH [Salmon]"),
+    "maldi ims": ("MALDI IMS", "MALDI-IMS"),
+    "maldi": ("MALDI IMS", "MALDI-IMS"),
+}
+
+
+def resolve_organ_filters(value: str | None) -> tuple[str | None, ...]:
+    if not value or not value.strip():
+        return (None,)
+    text = value.strip()
+    return ORGAN_ALIASES.get(text.casefold(), (text,))
+
+
+def resolve_dataset_type_filters(value: str | None) -> tuple[str | None, ...]:
+    if not value or not value.strip():
+        return (None,)
+    text = value.strip()
+    return ASSAY_ALIASES.get(text.casefold(), (text,))
 
 
 class HuBMAPClient:
@@ -52,13 +95,12 @@ class HuBMAPClient:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def search_datasets(
+    def _search_once(
         self,
         *,
-        dataset_type: str | None = None,
-        organ: str | None = None,
-        status: str | None = "Published",
-        limit: int = 100,
+        dataset_type: str | None,
+        organ: str | None,
+        status: str | None,
     ) -> list[DatasetRecord]:
         params: dict[str, Any] = {}
         if dataset_type:
@@ -83,9 +125,38 @@ class HuBMAPClient:
         if response.status_code == 404:
             return []
         response.raise_for_status()
+        return [_normalize_hit(hit) for hit in _extract_hits(response.json())]
 
+    def search_datasets(
+        self,
+        *,
+        dataset_type: str | None = None,
+        organ: str | None = None,
+        status: str | None = "Published",
+        limit: int = 100,
+    ) -> list[DatasetRecord]:
+        """Search HuBMAP, accepting friendly organ and common assay aliases."""
         bounded_limit = max(1, min(limit, 1000))
-        return [_normalize_hit(hit) for hit in _extract_hits(response.json())[:bounded_limit]]
+        assay_filters = resolve_dataset_type_filters(dataset_type)
+        organ_filters = resolve_organ_filters(organ)
+        merged: list[DatasetRecord] = []
+        seen: set[str] = set()
+
+        for assay_value in assay_filters:
+            for organ_value in organ_filters:
+                for record in self._search_once(
+                    dataset_type=assay_value,
+                    organ=organ_value,
+                    status=status,
+                ):
+                    key = record.dataset_id or record.portal_url or record.title
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(record)
+                    if len(merged) >= bounded_limit:
+                        return merged
+        return merged[:bounded_limit]
 
 
 def _extract_hits(payload: Any) -> list[Mapping[str, Any]]:
@@ -145,6 +216,7 @@ def _normalize_hit(hit: Mapping[str, Any]) -> DatasetRecord:
         status=_text(source.get("status")),
         organ=_text(organ),
         donor_id=_text(donor_id),
+        access_level=_text(source.get("data_access_level")),
         doi_url=_text(source.get("doi_url") or source.get("registered_doi")),
         portal_url=PORTAL_DATASET_URL.format(uuid=dataset_id) if dataset_id else None,
         raw=dict(source),
@@ -157,3 +229,13 @@ def _text(value: Any) -> str | None:
     if isinstance(value, list):
         return ", ".join(str(x) for x in value)
     return str(value)
+
+
+__all__ = [
+    "ASSAY_ALIASES",
+    "ORGAN_ALIASES",
+    "SPATIAL_DATASET_TYPES",
+    "HuBMAPClient",
+    "resolve_dataset_type_filters",
+    "resolve_organ_filters",
+]

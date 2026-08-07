@@ -9,8 +9,8 @@ authors:
     affiliation: Radiation Effects Research Foundation
 repository-code: https://github.com/liuifrec/cellondesk
 url: https://github.com/liuifrec/cellondesk
-version: 0.10.0
-date-released: 2026-08-06
+version: 0.11.0
+date-released: 2026-08-07
 license: BSD-3-Clause
 keywords:
   - single-cell genomics
@@ -19,4 +19,5 @@ keywords:
   - H5AD
   - CELLxGENE Census
   - HuBMAP
+  - UCSC Cell Browser
   - Windows desktop
