@@ -7,10 +7,11 @@ from typing import Any
 import httpx
 from typing_extensions import Self
 
-from cellondesk.models import DatasetRecord
+from cellondesk.models import DataAsset, DatasetRecord
 
 SEARCH_URL = "https://search.api.hubmapconsortium.org/v3/param-search/datasets"
 PORTAL_DATASET_URL = "https://portal.hubmapconsortium.org/browse/dataset/{uuid}"
+ASSET_ROOT_URL = "https://assets.hubmapconsortium.org"
 SPATIAL_DATASET_TYPES = (
     "Visium (no probes)",
     "Visium (with probes)",
@@ -23,8 +24,15 @@ SPATIAL_DATASET_TYPES = (
     "scRNA-seq / snRNA-seq",
 )
 
-# HuBMAP exposes compact organ codes in its search index. Keep the API codes in
-# one place so desktop users can search with ordinary anatomical names.
+# Common processed HuBMAP single-cell products. Availability is verified before
+# a product is shown to the user; these are candidates, not promises.
+H5AD_PRODUCT_CANDIDATES: tuple[tuple[str, str], ...] = (
+    ("expr.h5ad", "Raw gene expression"),
+    ("raw_expr.h5ad", "Raw gene expression"),
+    ("secondary_analysis.h5ad", "Normalized expression with analysis metadata"),
+    ("scvelo_annotated.h5ad", "RNA velocity analysis"),
+)
+
 ORGAN_ALIASES: dict[str, tuple[str, ...]] = {
     "kidney": ("LK", "RK"),
     "left kidney": ("LK",),
@@ -34,9 +42,6 @@ ORGAN_ALIASES: dict[str, tuple[str, ...]] = {
     "spleen": ("SP",),
 }
 
-# A friendly label can map to several HuBMAP dataset_type values. Exact values
-# are still accepted unchanged, which keeps this adapter compatible with new
-# assay names appearing in the portal.
 ASSAY_ALIASES: dict[str, tuple[str, ...]] = {
     "scrna-seq / snrna-seq": (
         "RNAseq",
@@ -67,7 +72,7 @@ def resolve_dataset_type_filters(value: str | None) -> tuple[str | None, ...]:
 
 
 class HuBMAPClient:
-    """Synchronous client for HuBMAP parameterized dataset search."""
+    """Synchronous client for HuBMAP search and public data-product discovery."""
 
     def __init__(
         self,
@@ -85,9 +90,15 @@ class HuBMAPClient:
             transport=transport,
             follow_redirects=False,
         )
+        self._asset_client = httpx.Client(
+            timeout=timeout,
+            transport=transport,
+            follow_redirects=True,
+        )
 
     def close(self) -> None:
         self._client.close()
+        self._asset_client.close()
 
     def __enter__(self) -> Self:
         return self
@@ -115,12 +126,11 @@ class HuBMAPClient:
         response = self._client.get(SEARCH_URL, params=params)
         if response.status_code == 303:
             location = response.headers.get("location")
+            # The live parameter-search service occasionally emits an empty 303
+            # for a no-match branch of a multi-alias query. Treat it as no hits
+            # instead of failing the whole friendly-organ search.
             if not location:
-                raise httpx.HTTPStatusError(
-                    "HuBMAP returned a redirect without a location",
-                    request=response.request,
-                    response=response,
-                )
+                return []
             response = self._client.get(location)
         if response.status_code == 404:
             return []
@@ -157,6 +167,93 @@ class HuBMAPClient:
                     if len(merged) >= bounded_limit:
                         return merged
         return merged[:bounded_limit]
+
+    def resolve_assets(self, record: DatasetRecord) -> list[DataAsset]:
+        """Find verified public H5AD products for a HuBMAP record and descendants."""
+        dataset_ids = _candidate_dataset_ids(record)
+        assets: list[DataAsset] = []
+        seen_urls: set[str] = set()
+        for dataset_id in dataset_ids:
+            for name, description in H5AD_PRODUCT_CANDIDATES:
+                url = f"{ASSET_ROOT_URL}/{dataset_id}/{name}"
+                if url in seen_urls:
+                    continue
+                probe = self._probe_asset(url)
+                if probe is None:
+                    continue
+                size_bytes, final_url = probe
+                seen_urls.add(url)
+                assets.append(
+                    DataAsset(
+                        source="HuBMAP",
+                        dataset_id=dataset_id,
+                        name=name,
+                        download_url=final_url,
+                        size_bytes=size_bytes,
+                        description=description,
+                        format="h5ad",
+                        access_level="public",
+                        is_h5ad=True,
+                        raw={"requested_from": record.dataset_id},
+                    )
+                )
+        return assets
+
+    def _probe_asset(self, url: str) -> tuple[int | None, str] | None:
+        try:
+            response = self._asset_client.head(url)
+            if response.status_code in {403, 405}:
+                response = self._asset_client.get(url, headers={"Range": "bytes=0-0"})
+            if response.status_code in {401, 403, 404}:
+                return None
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return None
+        size = _response_size(response)
+        return size, str(response.url)
+
+
+def _response_size(response: httpx.Response) -> int | None:
+    content_range = response.headers.get("content-range")
+    if content_range and "/" in content_range:
+        total = content_range.rsplit("/", 1)[-1]
+        if total.isdigit():
+            return int(total)
+    content_length = response.headers.get("content-length")
+    if content_length and content_length.isdigit() and response.status_code != 206:
+        return int(content_length)
+    return None
+
+
+def _candidate_dataset_ids(record: DatasetRecord) -> list[str]:
+    candidates = [record.dataset_id]
+    for key in (
+        "descendant_ids",
+        "descendants",
+        "immediate_descendants",
+        "processed_dataset_ids",
+    ):
+        candidates.extend(_ids(record.raw.get(key)))
+    return list(dict.fromkeys(value for value in candidates if value))
+
+
+def _ids(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        own = value.get("uuid") or value.get("id")
+        values = [str(own)] if own else []
+        for nested in value.values():
+            values.extend(_ids(nested))
+        return values
+    if isinstance(value, list):
+        values: list[str] = []
+        for nested in value:
+            values.extend(_ids(nested))
+        return values
+    return []
 
 
 def _extract_hits(payload: Any) -> list[Mapping[str, Any]]:
@@ -233,6 +330,8 @@ def _text(value: Any) -> str | None:
 
 __all__ = [
     "ASSAY_ALIASES",
+    "ASSET_ROOT_URL",
+    "H5AD_PRODUCT_CANDIDATES",
     "ORGAN_ALIASES",
     "SPATIAL_DATASET_TYPES",
     "HuBMAPClient",
