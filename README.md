@@ -2,7 +2,7 @@
 
 **CellOnDesk** is a local-first browser and command-line toolkit for discovering public single-cell and spatial-omics datasets, inspecting large local H5AD files with bounded memory, and producing portable offline review reports.
 
-> **Status:** technical alpha (`0.8.0` release candidate). CLI workflows are suitable for regular internal exploratory use. Public release hardening and broader real-dataset validation are in progress.
+> **Status:** technical alpha (`0.10.0` internal Windows desktop preview). CLI workflows are suitable for regular internal exploratory use. The Windows installer is validated in CI; real-machine desktop testing, public release hardening, and broader real-dataset validation are still in progress.
 
 ## Current capabilities
 
