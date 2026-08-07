@@ -136,4 +136,4 @@ def _normalize(item: Mapping[str, Any]) -> DatasetRecord:
     )
 
 
-__all__ = ["CellxGeneDiscoverClient", "DATASET_INDEX_URL"]
+__all__ = ["DATASET_INDEX_URL", "CellxGeneDiscoverClient"]
