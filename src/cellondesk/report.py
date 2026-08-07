@@ -152,6 +152,7 @@ footer{{color:var(--muted);padding:5px 30px 25px;text-align:center}} @media prin
 <div class="card metric"><strong>{len(_counts(items, 'dataset_type')) if items else 0}</strong><span>Assay types</span></div>
 <div class="card metric"><strong>{len(_counts(items, 'organ')) if items else 0}</strong><span>Organs</span></div>
 <div class="card metric"><strong>{with_doi}</strong><span>With DOI</span></div>
+<div class="card metric"><strong>{with_donor}</strong><span>With donor ID</span></div>
 </div>
 <div class="grid two" style="margin-top:16px">
 <div class="card"><h2>Assay distribution</h2>{_distribution_rows(_counts(items, 'dataset_type'), total)}</div>
