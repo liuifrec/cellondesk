@@ -382,6 +382,8 @@ def main() -> None:
             except (httpx.HTTPError, ValueError) as exc:
                 QMessageBox.critical(self, "HuBMAP search failed", str(exc))
                 return
+            self.table.clearSelection()
+            self.details.clear()
             self.table.setRowCount(len(self.records))
             for row, record in enumerate(self.records):
                 self._set_row(
@@ -397,6 +399,8 @@ def main() -> None:
                     ],
                 )
             self.table.resizeColumnsToContents()
+            if self.records:
+                self.table.selectRow(0)
             self.statusBar().showMessage(f"Found {len(self.records)} HuBMAP datasets")
 
         def selected_records(self) -> list[DatasetRecord]:
@@ -481,6 +485,8 @@ def main() -> None:
             except (httpx.HTTPError, TypeError, ValueError) as exc:
                 QMessageBox.critical(self, "CELLxGENE Discover search failed", str(exc))
                 return
+            self.cxg_table.clearSelection()
+            self.cxg_details.clear()
             self.cxg_table.setRowCount(len(self.cellxgene_records))
             for row, record in enumerate(self.cellxgene_records):
                 self._set_row(
@@ -495,6 +501,8 @@ def main() -> None:
                     ],
                 )
             self.cxg_table.resizeColumnsToContents()
+            if self.cellxgene_records:
+                self.cxg_table.selectRow(0)
             self.statusBar().showMessage(f"Found {len(self.cellxgene_records)} CELLxGENE datasets")
 
         def download_cellxgene_product(self) -> None:
@@ -564,6 +572,8 @@ def main() -> None:
             except (httpx.HTTPError, TypeError, ValueError) as exc:
                 QMessageBox.critical(self, "UCSC Cell Browser search failed", str(exc))
                 return
+            self.ucsc_table.clearSelection()
+            self.ucsc_details.clear()
             self.ucsc_table.setRowCount(len(self.ucsc_records))
             for row, record in enumerate(self.ucsc_records):
                 self._set_row(
@@ -578,6 +588,8 @@ def main() -> None:
                     ],
                 )
             self.ucsc_table.resizeColumnsToContents()
+            if self.ucsc_records:
+                self.ucsc_table.selectRow(0)
             self.statusBar().showMessage(f"Found {len(self.ucsc_records)} UCSC datasets")
 
         def download_ucsc_product(self) -> None:
