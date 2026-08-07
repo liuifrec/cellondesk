@@ -14,12 +14,13 @@ from .h5ad_report import write_h5ad_report
 from .manifest import write_hubmap_manifest
 from .models import DatasetRecord
 from .report import write_html_report
+from .sources.cellxgene_discover import CellxGeneDiscoverClient
 from .sources.census import CensusGenePreview, CensusQuery, preview_census_gene
 from .sources.hubmap import SPATIAL_DATASET_TYPES, HuBMAPClient
 from .sources.ucsc_cellbrowser import UCSCCellBrowserClient
 
 CELLXGENE_DISCOVER_URL = "https://cellxgene.cziscience.com/datasets"
-CELLXGENE_CENSUS_URL = "https://cellxgene.cziscience.com/census-models"
+CELLXGENE_CENSUS_URL = "https://chanzuckerberg.github.io/cellxgene-census/"
 
 
 def main() -> None:
@@ -54,6 +55,7 @@ def main() -> None:
             self.setWindowTitle("CellOnDesk")
             self.resize(1320, 820)
             self.records: list[DatasetRecord] = []
+            self.cellxgene_records: list[DatasetRecord] = []
             self.ucsc_records: list[DatasetRecord] = []
             self.census_preview: CensusGenePreview | None = None
             self.h5ad_inspection: H5ADInspection | None = None
@@ -136,69 +138,127 @@ def main() -> None:
         def _build_cellxgene_tab(self) -> QWidget:
             root = QWidget()
             layout = QVBoxLayout(root)
+            helper = QLabel(
+                "Search the public CELLxGENE Discover dataset index directly from Windows. "
+                "The optional Census/SOMA gene-preview tools are separate and only activate when "
+                "the native Census dependency is available."
+            )
+            helper.setWordWrap(True)
+            layout.addWidget(helper)
+
+            filter_row = QHBoxLayout()
+            self.cxg_tissue = QLineEdit()
+            self.cxg_tissue.setPlaceholderText("kidney, lung, blood, ...")
+            self.cxg_disease = QLineEdit()
+            self.cxg_disease.setPlaceholderText("normal, cancer, ...")
+            self.cxg_organism = QLineEdit()
+            self.cxg_organism.setPlaceholderText("Homo sapiens, Mus musculus, ...")
+            self.cxg_cell_type = QLineEdit()
+            self.cxg_cell_type.setPlaceholderText("T cell, endothelial cell, ...")
+            for widget in (
+                QLabel("Tissue"),
+                self.cxg_tissue,
+                QLabel("Disease"),
+                self.cxg_disease,
+                QLabel("Organism"),
+                self.cxg_organism,
+                QLabel("Cell type"),
+                self.cxg_cell_type,
+            ):
+                filter_row.addWidget(widget)
+            layout.addLayout(filter_row)
+
+            action_row = QHBoxLayout()
+            self.cxg_query = QLineEdit()
+            self.cxg_query.setPlaceholderText("Optional text search across title and metadata")
+            self.cxg_limit = QSpinBox()
+            self.cxg_limit.setRange(1, 500)
+            self.cxg_limit.setValue(50)
+            search_button = QPushButton("Search CELLxGENE")
+            open_button = QPushButton("Open / download selected")
+            discover_button = QPushButton("Open Discover website")
+            for widget in (
+                QLabel("Text"),
+                self.cxg_query,
+                QLabel("Limit"),
+                self.cxg_limit,
+                search_button,
+                open_button,
+                discover_button,
+            ):
+                action_row.addWidget(widget)
+            layout.addLayout(action_row)
+
+            self.cxg_table = QTableWidget(0, 5)
+            self.cxg_table.setHorizontalHeaderLabels(
+                ["Dataset", "Assay", "Tissue", "Access", "Title"]
+            )
+            self.cxg_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+            self.cxg_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+            self.cxg_details = QTextEdit()
+            self.cxg_details.setReadOnly(True)
+            cxg_splitter = QSplitter(Qt.Orientation.Vertical)
+            cxg_splitter.addWidget(self.cxg_table)
+            cxg_splitter.addWidget(self.cxg_details)
+            layout.addWidget(cxg_splitter)
+
             census_available = importlib.util.find_spec("cellxgene_census") is not None
-            if census_available:
-                status_text = (
-                    "Native CELLxGENE Census support is available in this environment. "
-                    "Use the bounded gene preview below or open Discover for full dataset downloads."
+            census_status = QLabel(
+                (
+                    "Native CELLxGENE Census support is available: bounded gene previews are enabled."
+                    if census_available
+                    else "Native CELLxGENE Census/SOMA is not bundled in the Windows installer. "
+                    "Discover search/download above still works; download an H5AD and use Local H5AD."
                 )
-            else:
-                status_text = (
-                    "This Windows desktop package does not bundle the native CELLxGENE Census/SOMA "
-                    "stack. Dataset discovery and download remain available through CELLxGENE Discover; "
-                    "download an H5AD there and inspect it in the Local H5AD tab."
-                )
-            status = QLabel(status_text)
-            status.setWordWrap(True)
-            layout.addWidget(status)
+            )
+            census_status.setWordWrap(True)
+            layout.addWidget(census_status)
 
-            portal_controls = QHBoxLayout()
-            discover_button = QPushButton("Open CELLxGENE Discover")
-            census_button = QPushButton("Open Census documentation")
-            portal_controls.addWidget(discover_button)
-            portal_controls.addWidget(census_button)
-            portal_controls.addStretch(1)
-            layout.addLayout(portal_controls)
-
-            query = QWidget()
-            query_form = QFormLayout(query)
+            census_query = QWidget()
+            census_form = QFormLayout(census_query)
             self.census_gene = QLineEdit()
             self.census_gene.setPlaceholderText("Gene, e.g. CD3D")
             self.census_tissue = QLineEdit()
-            self.census_tissue.setPlaceholderText("Optional tissue, e.g. kidney")
+            self.census_tissue.setPlaceholderText("Optional exact tissue label")
             self.census_cell_type = QLineEdit()
             self.census_cell_type.setPlaceholderText("Optional exact cell type")
             self.census_max_cells = QSpinBox()
             self.census_max_cells.setRange(100, 50000)
             self.census_max_cells.setValue(5000)
-            query_form.addRow("Gene", self.census_gene)
-            query_form.addRow("Tissue", self.census_tissue)
-            query_form.addRow("Cell type", self.census_cell_type)
-            query_form.addRow("Max cells", self.census_max_cells)
-            layout.addWidget(query)
+            census_form.addRow("Census gene", self.census_gene)
+            census_form.addRow("Census tissue", self.census_tissue)
+            census_form.addRow("Census cell type", self.census_cell_type)
+            census_form.addRow("Max cells", self.census_max_cells)
+            layout.addWidget(census_query)
 
             census_controls = QHBoxLayout()
             preview_button = QPushButton("Run bounded Census preview")
             export_button = QPushButton("Export Census HTML")
+            census_docs_button = QPushButton("Census documentation")
             preview_button.setEnabled(census_available)
             export_button.setEnabled(census_available)
             census_controls.addWidget(preview_button)
             census_controls.addWidget(export_button)
+            census_controls.addWidget(census_docs_button)
             census_controls.addStretch(1)
             layout.addLayout(census_controls)
 
             self.census_details = QTextEdit()
             self.census_details.setReadOnly(True)
+            self.census_details.setMaximumHeight(150)
             self.census_details.setPlaceholderText(
-                "Census preview statistics, provenance and warnings will appear here when the "
-                "optional native Census dependency is available."
+                "Optional Census preview statistics and provenance appear here."
             )
             layout.addWidget(self.census_details)
 
+            search_button.clicked.connect(self.search_cellxgene)
+            open_button.clicked.connect(self.open_selected_cellxgene)
             discover_button.clicked.connect(lambda: webbrowser.open(CELLXGENE_DISCOVER_URL))
-            census_button.clicked.connect(lambda: webbrowser.open(CELLXGENE_CENSUS_URL))
+            census_docs_button.clicked.connect(lambda: webbrowser.open(CELLXGENE_CENSUS_URL))
             preview_button.clicked.connect(self.run_census_preview)
             export_button.clicked.connect(self.export_census_html)
+            self.cxg_table.itemSelectionChanged.connect(self.show_cellxgene_details)
+            self.cxg_table.itemDoubleClicked.connect(lambda _item: self.open_selected_cellxgene())
             return root
 
         def _build_ucsc_tab(self) -> QWidget:
@@ -431,6 +491,72 @@ def main() -> None:
             else:
                 self.details.clear()
 
+        def search_cellxgene(self) -> None:
+            try:
+                with CellxGeneDiscoverClient() as client:
+                    self.cellxgene_records = client.search_datasets(
+                        tissue=self.cxg_tissue.text().strip() or None,
+                        disease=self.cxg_disease.text().strip() or None,
+                        organism=self.cxg_organism.text().strip() or None,
+                        cell_type=self.cxg_cell_type.text().strip() or None,
+                        query=self.cxg_query.text().strip() or None,
+                        limit=self.cxg_limit.value(),
+                    )
+            except (httpx.HTTPError, TypeError, ValueError) as exc:
+                QMessageBox.critical(self, "CELLxGENE Discover search failed", str(exc))
+                return
+            self.cxg_table.setRowCount(len(self.cellxgene_records))
+            for row, record in enumerate(self.cellxgene_records):
+                values = [
+                    record.dataset_id,
+                    record.dataset_type or "",
+                    record.organ or "",
+                    record.access_level or "public",
+                    record.title,
+                ]
+                for col, value in enumerate(values):
+                    self.cxg_table.setItem(row, col, QTableWidgetItem(value))
+            self.cxg_table.resizeColumnsToContents()
+            self.statusBar().showMessage(
+                f"Found {len(self.cellxgene_records)} CELLxGENE Discover datasets"
+            )
+
+        def _selected_cellxgene_record(self) -> DatasetRecord | None:
+            rows = sorted({index.row() for index in self.cxg_table.selectedIndexes()})
+            if not rows:
+                QMessageBox.information(
+                    self, "No dataset selected", "Select a CELLxGENE row first."
+                )
+                return None
+            return self.cellxgene_records[rows[0]]
+
+        def open_selected_cellxgene(self) -> None:
+            record = self._selected_cellxgene_record()
+            if record is None:
+                return
+            QMessageBox.information(
+                self,
+                "CELLxGENE data access",
+                "CELLxGENE Discover publishes these datasets for browser download. The selected "
+                "dataset page/explorer will open; use its Download control to retrieve the H5AD, "
+                "then inspect that file in the Local H5AD tab."
+            )
+            if record.portal_url:
+                webbrowser.open(record.portal_url)
+
+        def show_cellxgene_details(self) -> None:
+            rows = sorted({index.row() for index in self.cxg_table.selectedIndexes()})
+            if rows:
+                self.cxg_details.setPlainText(
+                    json.dumps(
+                        self.cellxgene_records[rows[0]].model_dump(),
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+            else:
+                self.cxg_details.clear()
+
         def run_census_preview(self) -> None:
             gene = self.census_gene.text().strip()
             if not gene:
@@ -490,7 +616,7 @@ def main() -> None:
                         organism=self.ucsc_organism.text().strip() or None,
                         limit=self.ucsc_limit.value(),
                     )
-            except (httpx.HTTPError, ValueError) as exc:
+            except (httpx.HTTPError, TypeError, ValueError) as exc:
                 QMessageBox.critical(self, "UCSC Cell Browser search failed", str(exc))
                 return
             self.ucsc_table.setRowCount(len(self.ucsc_records))
@@ -524,7 +650,7 @@ def main() -> None:
                 self,
                 "UCSC data access",
                 "The UCSC Cell Browser page provides an Info & Download/Data Download panel with "
-                "the matrix, metadata and coordinate files available for that dataset.",
+                "the matrix, metadata and coordinate files available for that dataset."
             )
             if record.portal_url:
                 webbrowser.open(record.portal_url)
@@ -593,7 +719,7 @@ def main() -> None:
                 QMessageBox.information(
                     self,
                     "Nothing to export",
-                    "Choose and inspect an H5AD file first.",
+                    "Choose and inspect an H5AD file first."
                 )
             return self.h5ad_inspection
 
