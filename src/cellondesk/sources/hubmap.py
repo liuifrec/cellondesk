@@ -12,6 +12,8 @@ from cellondesk.models import DataAsset, DatasetRecord
 SEARCH_URL = "https://search.api.hubmapconsortium.org/v3/param-search/datasets"
 PORTAL_DATASET_URL = "https://portal.hubmapconsortium.org/browse/dataset/{uuid}"
 ASSET_ROOT_URL = "https://assets.hubmapconsortium.org"
+
+# A short, scientist-facing list for the editable desktop assay selector.
 SPATIAL_DATASET_TYPES = (
     "Visium (no probes)",
     "Visium (with probes)",
@@ -22,6 +24,43 @@ SPATIAL_DATASET_TYPES = (
     "IMC",
     "MALDI IMS",
     "scRNA-seq / snRNA-seq",
+)
+
+# HuBMAP parameter-search can return an oversized result set through a 303
+# redirect. A broad organ-only query has occasionally returned an empty redirect
+# in real desktop use. When that happens, CellOnDesk retries the same organ
+# across source-native assay types, deduplicating records until the requested
+# limit is reached. Keep common single-cell/spatial types early so lazy searches
+# become useful quickly rather than requiring every type to be queried first.
+HUBMAP_DATASET_TYPES = (
+    "RNAseq",
+    "RNAseq (with probes)",
+    "Visium (no probes)",
+    "Visium (with probes)",
+    "Slideseq",
+    "MERFISH",
+    "CODEX",
+    "MIBI",
+    "2D Imaging Mass Cytometry",
+    "3D Imaging Mass Cytometry",
+    "MALDI",
+    "10X Multiome",
+    "ATACseq",
+    "Auto-fluorescence",
+    "DESI",
+    "GeoMx (NGS)",
+    "HiFi-Slide",
+    "Histology",
+    "LC-MS",
+    "Light Sheet",
+    "MUSIC",
+    "PhenoCycler",
+    "SIMS",
+    "SNARE-seq2",
+    "Second Harmonic Generation (SHG)",
+    "seqFISH",
+    "Thick section Multiphoton MxIF",
+    "WGS",
 )
 
 # Common processed HuBMAP single-cell products. Availability is verified before
@@ -52,8 +91,11 @@ ASSAY_ALIASES: dict[str, tuple[str, ...]] = {
     "scrna-seq": ("RNAseq", "scRNA-seq"),
     "snrna-seq": ("snRNA-seq", "snRNAseq"),
     "merfish": ("MERFISH", "MERFISH [Salmon]"),
-    "maldi ims": ("MALDI IMS", "MALDI-IMS"),
-    "maldi": ("MALDI IMS", "MALDI-IMS"),
+    "slide-seq": ("Slideseq", "Slide-seq"),
+    "slideseq": ("Slideseq", "Slide-seq"),
+    "maldi ims": ("MALDI", "MALDI IMS", "MALDI-IMS"),
+    "maldi": ("MALDI", "MALDI IMS", "MALDI-IMS"),
+    "imc": ("2D Imaging Mass Cytometry", "3D Imaging Mass Cytometry", "IMC"),
 }
 
 
@@ -126,9 +168,9 @@ class HuBMAPClient:
         response = self._client.get(SEARCH_URL, params=params)
         if response.status_code == 303:
             location = response.headers.get("location")
-            # The live parameter-search service occasionally emits an empty 303
-            # for a no-match branch of a multi-alias query. Treat it as no hits
-            # instead of failing the whole friendly-organ search.
+            # HuBMAP documents 303 for responses larger than 10 MB. In real
+            # use the service has occasionally emitted an empty location. The
+            # caller can then fall back to narrower per-assay requests.
             if not location:
                 return []
             response = self._client.get(location)
@@ -145,27 +187,45 @@ class HuBMAPClient:
         status: str | None = "Published",
         limit: int = 100,
     ) -> list[DatasetRecord]:
-        """Search HuBMAP, accepting friendly organ and common assay aliases."""
+        """Search HuBMAP, accepting friendly organ and common assay aliases.
+
+        When no assay is supplied, try the broad query first. If HuBMAP cannot
+        furnish that response directly, retry source-native assay types and
+        merge them. This makes a lazy query such as organ="kidney" useful while
+        retaining exact source-native searches when an assay is specified.
+        """
         bounded_limit = max(1, min(limit, 1000))
-        assay_filters = resolve_dataset_type_filters(dataset_type)
+        requested_assay = dataset_type.strip() if dataset_type and dataset_type.strip() else None
         organ_filters = resolve_organ_filters(organ)
         merged: list[DatasetRecord] = []
         seen: set[str] = set()
 
-        for assay_value in assay_filters:
-            for organ_value in organ_filters:
-                for record in self._search_once(
-                    dataset_type=assay_value,
-                    organ=organ_value,
-                    status=status,
-                ):
-                    key = record.dataset_id or record.portal_url or record.title
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    merged.append(record)
-                    if len(merged) >= bounded_limit:
-                        return merged
+        def collect(assay_values: tuple[str | None, ...]) -> bool:
+            for assay_value in assay_values:
+                for organ_value in organ_filters:
+                    for record in self._search_once(
+                        dataset_type=assay_value,
+                        organ=organ_value,
+                        status=status,
+                    ):
+                        key = record.dataset_id or record.portal_url or record.title
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        merged.append(record)
+                        if len(merged) >= bounded_limit:
+                            return True
+            return False
+
+        if requested_assay:
+            collect(resolve_dataset_type_filters(requested_assay))
+            return merged[:bounded_limit]
+
+        # First try the cheap broad query. If it produces no usable response or
+        # fewer records than requested, narrow by assay to fill the result set.
+        if collect((None,)):
+            return merged[:bounded_limit]
+        collect(tuple(HUBMAP_DATASET_TYPES))
         return merged[:bounded_limit]
 
     def resolve_assets(self, record: DatasetRecord) -> list[DataAsset]:
@@ -332,6 +392,7 @@ __all__ = [
     "ASSAY_ALIASES",
     "ASSET_ROOT_URL",
     "H5AD_PRODUCT_CANDIDATES",
+    "HUBMAP_DATASET_TYPES",
     "ORGAN_ALIASES",
     "SPATIAL_DATASET_TYPES",
     "HuBMAPClient",
