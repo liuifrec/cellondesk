@@ -6,6 +6,7 @@ from .diagnostics import DiagnosticCheck, DiagnosticReport, run_diagnostics
 from .expression import GeneExpressionPreview, inspect_gene_expression
 from .h5ad_compat import H5ADInspection, inspect_h5ad
 from .models import DatasetRecord
+from .sources.cellxgene_discover import CellxGeneDiscoverClient
 from .sources.census import (
     SUPPORTED_CENSUS_VALUE_FIELDS,
     CensusGenePreview,
@@ -20,6 +21,7 @@ from .sources.ucsc_cellbrowser import UCSCCellBrowserClient
 
 __all__ = [
     "SUPPORTED_CENSUS_VALUE_FIELDS",
+    "CellxGeneDiscoverClient",
     "CensusGenePreview",
     "CensusQuery",
     "CensusValueCount",
