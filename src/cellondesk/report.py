@@ -42,13 +42,13 @@ def render_html_report(
     items = list(records)
     total = len(items)
     published = sum((record.status or "").lower() == "published" for record in items)
+    public_access = sum((record.access_level or "").lower() == "public" for record in items)
     with_doi = sum(bool(record.doi_url) for record in items)
     with_donor = sum(bool(record.donor_id) for record in items)
     missing_fields = {
         "assay": sum(not record.dataset_type for record in items),
         "organ": sum(not record.organ for record in items),
-        "donor": total - with_donor,
-        "DOI": total - with_doi,
+        "access level": sum(not record.access_level for record in items),
     }
     warnings = [
         f"{count} dataset{'s' if count != 1 else ''} missing {label}."
@@ -89,6 +89,7 @@ def render_html_report(
                     record.dataset_type,
                     record.organ,
                     record.status,
+                    record.access_level,
                     record.donor_id,
                 ],
             )
@@ -98,6 +99,7 @@ def render_html_report(
             f"<td>{portal}</td><td>{_escape(record.dataset_type or '—')}</td>"
             f"<td>{_escape(record.organ or '—')}</td>"
             f"<td>{_escape(record.status or '—')}</td>"
+            f"<td>{_escape(record.access_level or '—')}</td>"
             f"<td>{_escape(record.donor_id or '—')}</td>"
             f"<td class=\"title-cell\">{_escape(record.title)}</td><td>{doi}</td></tr>"
         )
@@ -137,7 +139,7 @@ footer{{color:var(--muted);padding:5px 30px 25px;text-align:center}} @media prin
 </style>
 </head>
 <body>
-<header><h1>{_escape(title)}</h1><p>{total} public dataset records · generated {generated}</p></header>
+<header><h1>{_escape(title)}</h1><p>{total} dataset records · generated {generated}</p></header>
 <nav>
 <button class="active" data-tab="summary">Summary</button><button data-tab="datasets">Datasets</button><button data-tab="provenance">Provenance</button>
 </nav>
@@ -146,21 +148,22 @@ footer{{color:var(--muted);padding:5px 30px 25px;text-align:center}} @media prin
 <div class="grid metrics">
 <div class="card metric"><strong>{total}</strong><span>Datasets</span></div>
 <div class="card metric"><strong>{published}</strong><span>Published</span></div>
+<div class="card metric"><strong>{public_access}</strong><span>Explicitly public</span></div>
 <div class="card metric"><strong>{len(_counts(items, 'dataset_type')) if items else 0}</strong><span>Assay types</span></div>
 <div class="card metric"><strong>{len(_counts(items, 'organ')) if items else 0}</strong><span>Organs</span></div>
 <div class="card metric"><strong>{with_doi}</strong><span>With DOI</span></div>
-<div class="card metric"><strong>{with_donor}</strong><span>With donor ID</span></div>
 </div>
 <div class="grid two" style="margin-top:16px">
 <div class="card"><h2>Assay distribution</h2>{_distribution_rows(_counts(items, 'dataset_type'), total)}</div>
 <div class="card"><h2>Organ distribution</h2>{_distribution_rows(_counts(items, 'organ'), total)}</div>
+<div class="card"><h2>Access distribution</h2>{_distribution_rows(_counts(items, 'access_level'), total)}</div>
 <div class="card warning"><h2>Metadata checks</h2><ul>{warning_html}</ul></div>
-<div class="card"><h2>Interpretation</h2><p>This dashboard describes portal metadata and selection provenance. It is not an experimental QC report and does not infer sequencing quality, tissue quality, or biological validity.</p></div>
+<div class="card"><h2>Interpretation</h2><p>This dashboard describes portal metadata and selection provenance. Published status and public download access are not treated as the same thing. It is not an experimental QC report and does not infer sequencing quality, tissue quality, or biological validity.</p></div>
 </div>
 </section>
 <section id="datasets" class="tab">
-<div class="card"><h2>Dataset inventory</h2><input id="filter" type="search" placeholder="Filter by ID, assay, organ, donor, status, or title…"><span id="visible-count" class="muted"></span>
-<div class="table-wrap"><table><thead><tr><th>Dataset</th><th>Assay</th><th>Organ</th><th>Status</th><th>Donor</th><th>Title</th><th>Citation</th></tr></thead><tbody>{''.join(table_rows)}</tbody></table></div></div>
+<div class="card"><h2>Dataset inventory</h2><input id="filter" type="search" placeholder="Filter by ID, assay, organ, access, donor, status, or title…"><span id="visible-count" class="muted"></span>
+<div class="table-wrap"><table><thead><tr><th>Dataset</th><th>Assay</th><th>Organ</th><th>Status</th><th>Access</th><th>Donor</th><th>Title</th><th>Citation</th></tr></thead><tbody>{''.join(table_rows)}</tbody></table></div></div>
 </section>
 <section id="provenance" class="tab">
 <div class="grid two"><div class="card"><h2>Search parameters</h2><table class="kv"><tbody>{query_rows}</tbody></table></div>
