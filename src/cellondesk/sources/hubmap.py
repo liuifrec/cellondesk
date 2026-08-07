@@ -229,7 +229,7 @@ class HuBMAPClient:
         return merged[:bounded_limit]
 
     def resolve_assets(self, record: DatasetRecord) -> list[DataAsset]:
-        """Find verified public H5AD products for a HuBMAP record and descendants."""
+        """Find public H5AD products and an official CLT-manifest fallback."""
         dataset_ids = _candidate_dataset_ids(record)
         assets: list[DataAsset] = []
         seen_urls: set[str] = set()
@@ -257,6 +257,10 @@ class HuBMAPClient:
                         raw={"requested_from": record.dataset_id},
                     )
                 )
+
+        manifest = _clt_manifest_asset(record)
+        if manifest is not None:
+            assets.append(manifest)
         return assets
 
     def _probe_asset(self, url: str) -> tuple[int | None, str] | None:
@@ -271,6 +275,39 @@ class HuBMAPClient:
             return None
         size = _response_size(response)
         return size, str(response.url)
+
+
+def _clt_manifest_asset(record: DatasetRecord) -> DataAsset | None:
+    """Create a SearchAPI URL that returns a one-dataset CLT manifest."""
+    hubmap_id = record.raw.get("hubmap_id")
+    if not hubmap_id and record.dataset_id.upper().startswith("HBM"):
+        hubmap_id = record.dataset_id
+    if not hubmap_id:
+        return None
+    hubmap_id = str(hubmap_id).strip()
+    manifest_url = str(
+        httpx.URL(
+            SEARCH_URL,
+            params={
+                "hubmap_id": hubmap_id,
+                "produce-clt-manifest": "true",
+            },
+        )
+    )
+    return DataAsset(
+        source="HuBMAP",
+        dataset_id=record.dataset_id,
+        name=f"{hubmap_id}-clt-manifest.txt",
+        download_url=manifest_url,
+        description=(
+            "Official HuBMAP bulk-transfer manifest. Use with hubmap-clt + "
+            "Globus Connect Personal; this file is not the dataset itself."
+        ),
+        format="text/plain",
+        access_level=record.access_level,
+        is_h5ad=False,
+        raw={"hubmap_id": hubmap_id, "transfer_method": "HuBMAP CLT / Globus"},
+    )
 
 
 def _response_size(response: httpx.Response) -> int | None:
