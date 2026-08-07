@@ -7,10 +7,23 @@ from urllib.parse import quote
 import httpx
 from typing_extensions import Self
 
-from cellondesk.models import DatasetRecord
+from cellondesk.models import DataAsset, DatasetRecord
 
 ROOT_URL = "https://cells.ucsc.edu"
 CATALOG_URL = f"{ROOT_URL}/dataset.json"
+_DOWNLOAD_SUFFIXES = (
+    ".h5ad",
+    ".loom",
+    ".mtx",
+    ".mtx.gz",
+    ".tsv",
+    ".tsv.gz",
+    ".csv",
+    ".csv.gz",
+    ".txt",
+    ".txt.gz",
+)
+_CONVENTIONAL_FILES = ("exprMatrix.tsv.gz", "meta.tsv")
 
 
 class UCSCCellBrowserClient:
@@ -95,13 +108,64 @@ class UCSCCellBrowserClient:
                     if len(records) >= bounded_limit:
                         return records
             else:
-                record = _normalize(item, name)
+                merged = dict(item)
+                merged.update(payload)
+                record = _normalize(merged, name)
                 if record.dataset_id not in seen:
                     records.append(record)
                     seen.add(record.dataset_id)
                 if len(records) >= bounded_limit:
                     return records
         return records
+
+    def resolve_assets(self, record: DatasetRecord) -> list[DataAsset]:
+        """Resolve public matrix/metadata files from Cell Browser dataset metadata."""
+        names = _candidate_files(record.raw)
+        names.extend(_CONVENTIONAL_FILES)
+        names = list(dict.fromkeys(name for name in names if name))
+        base = record.dataset_id.strip("/")
+        assets: list[DataAsset] = []
+        for name in names:
+            if not _looks_downloadable(name):
+                continue
+            url = f"{ROOT_URL}/{base}/{name.lstrip('/')}"
+            size = self._probe(url)
+            if size is False:
+                continue
+            is_h5ad = name.casefold().endswith(".h5ad")
+            assets.append(
+                DataAsset(
+                    source="UCSC Cell Browser",
+                    dataset_id=record.dataset_id,
+                    name=name.rsplit("/", 1)[-1],
+                    download_url=url,
+                    size_bytes=size if isinstance(size, int) else None,
+                    description=_ucsc_description(name),
+                    format="h5ad" if is_h5ad else name.rsplit(".", 1)[-1],
+                    access_level="public",
+                    is_h5ad=is_h5ad,
+                    raw={"relative_path": name},
+                )
+            )
+        return assets
+
+    def _probe(self, url: str) -> int | bool | None:
+        try:
+            response = self._client.head(url)
+            if response.status_code == 405:
+                response = self._client.get(url, headers={"Range": "bytes=0-0"})
+            if response.status_code == 404:
+                return False
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return False
+        content_range = response.headers.get("content-range")
+        if content_range and "/" in content_range:
+            total = content_range.rsplit("/", 1)[-1]
+            if total.isdigit():
+                return int(total)
+        length = response.headers.get("content-length")
+        return int(length) if length and length.isdigit() and response.status_code != 206 else None
 
 
 def _values(value: Any) -> list[str]:
@@ -169,6 +233,29 @@ def _matches(
     return not (organism and organism.strip().casefold() not in haystack)
 
 
+def _candidate_files(item: Mapping[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("hasFiles", "files", "downloads", "exprMatrix", "meta", "coords"):
+        values.extend(_values(item.get(key)))
+    return [value.strip() for value in values if _looks_downloadable(value.strip())]
+
+
+def _looks_downloadable(value: str) -> bool:
+    lower = value.casefold().split("?", 1)[0]
+    return lower.endswith(_DOWNLOAD_SUFFIXES)
+
+
+def _ucsc_description(name: str) -> str:
+    lower = name.casefold()
+    if "exprmatrix" in lower or ".mtx" in lower:
+        return "Expression matrix"
+    if "meta" in lower:
+        return "Cell metadata"
+    if "coord" in lower or "umap" in lower or "tsne" in lower:
+        return "Cell coordinates"
+    return "UCSC Cell Browser data file"
+
+
 def _normalize(item: Mapping[str, Any], path: str) -> DatasetRecord:
     title = _field(item, "shortLabel", "label", "title") or path
     assay = _field(item, "assays", "assay")
@@ -187,7 +274,6 @@ def _normalize(item: Mapping[str, Any], path: str) -> DatasetRecord:
         organ=organ,
         access_level="public",
         portal_url=portal,
-        download_url=portal,
         raw=dict(item),
     )
 
