@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from cellondesk.sources.cellxgene_discover import CellxGeneDiscoverClient, DATASET_INDEX_URL
+from cellondesk.sources.cellxgene_discover import DATASET_INDEX_URL, CellxGeneDiscoverClient
 
 
 def _payload():
