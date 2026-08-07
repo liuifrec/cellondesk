@@ -16,6 +16,7 @@ from .sources.census import (
     list_census_values,
     preview_census_gene,
 )
+from .sources.ucsc_cellbrowser import UCSCCellBrowserClient
 
 __all__ = [
     "SUPPORTED_CENSUS_VALUE_FIELDS",
@@ -29,6 +30,7 @@ __all__ = [
     "DiagnosticReport",
     "GeneExpressionPreview",
     "H5ADInspection",
+    "UCSCCellBrowserClient",
     "inspect_gene_expression",
     "inspect_h5ad",
     "list_census_values",
@@ -37,4 +39,4 @@ __all__ = [
     "run_diagnostics",
     "write_census_report",
 ]
-__version__ = "0.10.0"
+__version__ = "0.11.0"
