@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from cellondesk.models import DatasetRecord
 from cellondesk.sources.cellxgene_discover import DATASET_INDEX_URL, CellxGeneDiscoverClient
 
 
@@ -58,12 +59,13 @@ def test_cellxgene_discover_filters_public_index():
 
 def test_cellxgene_discover_resolves_h5ad_assets():
     client = CellxGeneDiscoverClient(transport=httpx.MockTransport(lambda _request: httpx.Response(200)))
-    record = client.search_datasets if False else None
-    del record
-    from cellondesk.sources.cellxgene_discover import _normalize
-
-    normalized = _normalize(_payload()[0])
-    assets = client.resolve_assets(normalized)
+    record = DatasetRecord(
+        source="CELLxGENE Discover",
+        dataset_id="kidney-1",
+        title="Human kidney atlas",
+        raw=_payload()[0],
+    )
+    assets = client.resolve_assets(record)
     client.close()
 
     assert len(assets) == 1
