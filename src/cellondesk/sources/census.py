@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
@@ -155,7 +155,7 @@ def _cellondesk_version() -> str:
     try:
         return version("cellondesk")
     except PackageNotFoundError:  # pragma: no cover - source checkout
-        return "0.8.0"
+        return "0.11.0"
 
 
 def _resolve_census_version(census: Any, requested: str) -> str:
@@ -252,7 +252,7 @@ def list_census_values(
         contains=contains,
         requested_census_version=census_version,
         resolved_census_version=resolved_version,
-        generated_at_utc=datetime.now(UTC).isoformat(),
+        generated_at_utc=datetime.now(timezone.utc).isoformat(),
         cellondesk_version=_cellondesk_version(),
         values=values,
     )
@@ -354,7 +354,7 @@ def preview_census_gene(
         values=[float(value) for value in values],
         requested_census_version=query.census_version,
         resolved_census_version=resolved_version,
-        generated_at_utc=datetime.now(UTC).isoformat(),
+        generated_at_utc=datetime.now(timezone.utc).isoformat(),
         cellondesk_version=_cellondesk_version(),
         dataset_citations=citations,
         warnings=warnings,
