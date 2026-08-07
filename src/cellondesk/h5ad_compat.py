@@ -8,6 +8,28 @@ from . import inspection as _core
 from .inspection import EmbeddingPreview, H5ADInspection
 
 
+class _LegacyCategoricalProxy:
+    """Present pandas-era AnnData category codes as a modern categorical node."""
+
+    def __init__(self, codes: Any, categories: Any) -> None:
+        self._codes = codes
+        self._categories = categories
+        self.attrs = {"encoding-type": "categorical"}
+
+    def keys(self) -> tuple[str, str]:
+        return ("codes", "categories")
+
+    def __contains__(self, key: object) -> bool:
+        return key in {"codes", "categories"}
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "codes":
+            return self._codes
+        if key == "categories":
+            return self._categories
+        raise KeyError(key)
+
+
 def _attribute_strings(value: Any) -> list[str]:
     """Flatten scalar, array, tuple, and structured HDF5 attributes to strings."""
     result: list[str] = []
@@ -79,8 +101,21 @@ def _contains_field(table: Any, name: str) -> bool:
     return name in table
 
 
+def _legacy_category_node(table: Any, name: str) -> Any | None:
+    if not hasattr(table, "keys") or "__categories" not in table:
+        return None
+    categories = table["__categories"]
+    if not hasattr(categories, "keys") or name not in categories:
+        return None
+    return categories[name]
+
+
 def _field(table: Any, name: str) -> Any:
-    return table[name]
+    node = table[name]
+    categories = _legacy_category_node(table, name)
+    if categories is not None and hasattr(node, "dtype"):
+        return _LegacyCategoricalProxy(node, categories)
+    return node
 
 
 def _encoding(node: Any) -> str:
@@ -131,6 +166,7 @@ def _candidate_feature_nodes(var_table: Any) -> list[tuple[str, Any]]:
         "gene_symbol",
         "gene_symbols",
         "gene_name",
+        "hugo_symbol",
     )
     result: list[tuple[str, Any]] = []
     seen: set[str] = set()
