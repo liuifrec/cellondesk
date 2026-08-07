@@ -2,7 +2,11 @@ import httpx
 import pytest
 
 from cellondesk.models import DatasetRecord
-from cellondesk.sources.cellxgene_discover import DATASET_INDEX_URL, CellxGeneDiscoverClient
+from cellondesk.sources.cellxgene_discover import (
+    CENSUS_RELEASE_DIRECTORY_URL,
+    DATASET_INDEX_URL,
+    CellxGeneDiscoverClient,
+)
 
 
 def _payload():
@@ -72,6 +76,50 @@ def test_cellxgene_discover_resolves_h5ad_assets():
     assert assets[0].name == "kidney-1.h5ad"
     assert assets[0].size_bytes == 123456
     assert assets[0].is_h5ad is True
+
+
+def test_cellxgene_discover_falls_back_to_census_source_h5ad():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == CENSUS_RELEASE_DIRECTORY_URL:
+            return httpx.Response(
+                200,
+                json={
+                    "stable": "2025-01-30",
+                    "2025-01-30": {
+                        "release_build": "2025-01-30",
+                        "h5ads": {
+                            "uri": (
+                                "s3://cellxgene-census-public-us-west-2/"
+                                "cell-census/2025-01-30/h5ads/"
+                            ),
+                            "s3_region": "us-west-2",
+                        },
+                    },
+                },
+            )
+        if (
+            request.method == "HEAD"
+            and request.url.host == "cellxgene-census-public-us-west-2.s3.us-west-2.amazonaws.com"
+            and request.url.path.endswith("/brain-1.h5ad")
+        ):
+            return httpx.Response(200, headers={"content-length": "4096"})
+        return httpx.Response(404)
+
+    client = CellxGeneDiscoverClient(transport=httpx.MockTransport(handler))
+    record = DatasetRecord(
+        source="CELLxGENE Discover",
+        dataset_id="brain-1",
+        title="Mouse brain atlas",
+        raw=_payload()[1],
+    )
+    assets = client.resolve_assets(record)
+    client.close()
+
+    assert len(assets) == 1
+    assert assets[0].name == "brain-1.h5ad"
+    assert assets[0].size_bytes == 4096
+    assert assets[0].is_h5ad is True
+    assert assets[0].raw["census_release"] == "2025-01-30"
 
 
 def test_cellxgene_discover_text_search_and_cell_count_sorting():
