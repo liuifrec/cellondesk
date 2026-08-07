@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from cellondesk.models import DatasetRecord
 from cellondesk.sources.cellxgene_discover import DATASET_INDEX_URL, CellxGeneDiscoverClient
 
 
@@ -17,6 +18,13 @@ def _payload():
             "cell_type": [{"label": "endothelial cell"}],
             "assay": [{"label": "10x 3' v3"}],
             "explorer_url": "https://cellxgene.cziscience.com/e/kidney-1.cxg/",
+            "assets": {
+                "dataset_h5ad": {
+                    "url": "https://example.test/kidney-1.h5ad",
+                    "filesize": 123456,
+                    "filetype": "H5AD",
+                }
+            },
         },
         {
             "id": "brain-1",
@@ -47,6 +55,23 @@ def test_cellxgene_discover_filters_public_index():
     assert records[0].dataset_type == "10x 3' v3"
     assert records[0].access_level == "public"
     assert records[0].portal_url.endswith("kidney-1.cxg/")
+
+
+def test_cellxgene_discover_resolves_h5ad_assets():
+    client = CellxGeneDiscoverClient(transport=httpx.MockTransport(lambda _request: httpx.Response(200)))
+    record = DatasetRecord(
+        source="CELLxGENE Discover",
+        dataset_id="kidney-1",
+        title="Human kidney atlas",
+        raw=_payload()[0],
+    )
+    assets = client.resolve_assets(record)
+    client.close()
+
+    assert len(assets) == 1
+    assert assets[0].name == "kidney-1.h5ad"
+    assert assets[0].size_bytes == 123456
+    assert assets[0].is_h5ad is True
 
 
 def test_cellxgene_discover_text_search_and_cell_count_sorting():
