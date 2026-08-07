@@ -46,4 +46,4 @@ __all__ = [
     "run_diagnostics",
     "write_census_report",
 ]
-__version__ = "0.11.1"
+__version__ = "0.11.2"

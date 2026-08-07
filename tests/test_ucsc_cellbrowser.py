@@ -74,6 +74,35 @@ def test_ucsc_resolves_verified_matrix_and_metadata_files():
     assert assets[1].description == "Cell metadata"
 
 
+def test_ucsc_prioritizes_expression_before_coordinates():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "HEAD":
+            return httpx.Response(200, headers={"content-length": "1024"})
+        return httpx.Response(404)
+
+    client = UCSCCellBrowserClient(transport=httpx.MockTransport(handler))
+    record = DatasetRecord(
+        source="UCSC Cell Browser",
+        dataset_id="covid19-autoimmune-pbmc",
+        title="COVID-19 Autoimmunity PBMCs",
+        raw={
+            "hasFiles": [
+                "UMAP.coords.tsv.gz",
+                "meta.tsv",
+                "exprMatrix.tsv.gz",
+            ]
+        },
+    )
+    assets = client.resolve_assets(record)
+    client.close()
+
+    assert [asset.name for asset in assets[:3]] == [
+        "exprMatrix.tsv.gz",
+        "meta.tsv",
+        "UMAP.coords.tsv.gz",
+    ]
+
+
 def test_ucsc_search_returns_no_unmatched_collection():
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
