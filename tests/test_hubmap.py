@@ -20,6 +20,8 @@ def test_friendly_filter_aliases():
     assert resolve_organ_filters("UT") == ("UT",)
     assert "MERFISH" in resolve_dataset_type_filters("MERFISH")
     assert "RNAseq" in resolve_dataset_type_filters("scRNA-seq")
+    assert "Slideseq" in resolve_dataset_type_filters("Slide-seq")
+    assert "MALDI" in resolve_dataset_type_filters("MALDI IMS")
 
 
 def test_search_normalizes_dataset():
@@ -70,6 +72,37 @@ def test_kidney_alias_searches_both_sides_and_deduplicates():
     records = client.search_datasets(dataset_type="CODEX", organ="kidney")
     client.close()
     assert {record.organ for record in records} == {"LK", "RK"}
+
+
+def test_lazy_organ_search_falls_back_to_narrow_assay_queries():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assay = request.url.params.get("dataset_type")
+        organ = request.url.params.get("origin_samples.organ")
+        if assay is None:
+            return httpx.Response(303)
+        if assay == "RNAseq" and organ == "LK":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "uuid": "rna-lk",
+                        "hubmap_id": "HBM111.ABCD.222",
+                        "dataset_type": "RNAseq",
+                        "status": "Published",
+                        "origin_samples": [{"organ": "LK"}],
+                    }
+                ],
+            )
+        return httpx.Response(404)
+
+    client = HuBMAPClient(transport=httpx.MockTransport(handler))
+    records = client.search_datasets(organ="kidney", limit=1)
+    client.close()
+
+    assert len(records) == 1
+    assert records[0].dataset_id == "rna-lk"
+    assert records[0].dataset_type == "RNAseq"
+    assert records[0].organ == "LK"
 
 
 def test_locationless_redirect_is_treated_as_empty_branch():
@@ -127,3 +160,25 @@ def test_resolve_assets_checks_record_and_descendant_products():
     assert assets[0].name == "expr.h5ad"
     assert assets[0].size_bytes == 2048
     assert assets[0].is_h5ad is True
+
+
+def test_resolve_assets_always_offers_official_clt_manifest_when_hubmap_id_exists():
+    client = HuBMAPClient(transport=httpx.MockTransport(lambda _request: httpx.Response(404)))
+    record = DatasetRecord(
+        source="HuBMAP",
+        dataset_id="0123456789abcdef0123456789abcdef",
+        title="Visium dataset",
+        dataset_type="Visium (no probes)",
+        access_level="protected",
+        raw={"hubmap_id": "HBM123.ABCD.456"},
+    )
+    assets = client.resolve_assets(record)
+    client.close()
+
+    assert len(assets) == 1
+    manifest = assets[0]
+    assert manifest.name == "HBM123.ABCD.456-clt-manifest.txt"
+    assert manifest.format == "text/plain"
+    assert manifest.is_h5ad is False
+    assert "produce-clt-manifest=true" in manifest.download_url
+    assert "hubmap_id=HBM123.ABCD.456" in manifest.download_url

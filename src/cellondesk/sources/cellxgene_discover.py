@@ -8,12 +8,15 @@ from typing_extensions import Self
 
 from cellondesk.models import DataAsset, DatasetRecord
 
-DATASET_INDEX_URL = "https://api.cellxgene.cziscience.com/dp/v1/datasets/index"
+# This is the same public dataset feed used by the official CELLxGENE Census
+# builder. Unlike the lightweight /dp/v1/datasets/index endpoint, it includes
+# the published asset list (including the source H5AD URL and filesize).
+DATASET_INDEX_URL = "https://api.cellxgene.cziscience.com/curation/v1/datasets"
 DISCOVER_DATASET_URL = "https://cellxgene.cziscience.com/datasets/{dataset_id}"
 
 
 class CellxGeneDiscoverClient:
-    """Read-only client for the public CZ CELLxGENE Discover dataset index."""
+    """Read-only client for public CZ CELLxGENE Discover datasets and assets."""
 
     def __init__(
         self,
@@ -46,7 +49,7 @@ class CellxGeneDiscoverClient:
         query: str | None = None,
         limit: int = 50,
     ) -> list[DatasetRecord]:
-        """Fetch the public index once, filter locally, and return normalized records."""
+        """Fetch the public dataset feed once, filter locally, and normalize records."""
         if not any(value and value.strip() for value in (tissue, disease, organism, cell_type, query)):
             raise ValueError(
                 "Provide at least one CELLxGENE filter: tissue, disease, organism, cell type, or text."
@@ -55,7 +58,7 @@ class CellxGeneDiscoverClient:
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, list):
-            raise TypeError("CELLxGENE Discover returned an unexpected dataset-index payload")
+            raise TypeError("CELLxGENE Discover returned an unexpected dataset payload")
 
         filtered = [item for item in payload if isinstance(item, Mapping)]
         for field, value in (
@@ -84,7 +87,7 @@ class CellxGeneDiscoverClient:
         return [_normalize(item) for item in filtered[:bounded_limit]]
 
     def resolve_assets(self, record: DatasetRecord) -> list[DataAsset]:
-        """Normalize public file assets already published in the Discover index."""
+        """Normalize published file assets from the CELLxGENE dataset feed."""
         raw_assets = record.raw.get("assets")
         if isinstance(raw_assets, Mapping):
             entries: list[tuple[str | None, Mapping[str, Any]]] = [
@@ -108,10 +111,10 @@ class CellxGeneDiscoverClient:
                 continue
             filetype = _first_text(asset, "filetype", "file_type", "type", "format") or key
             name = _first_text(asset, "filename", "name") or _filename_from_url(url)
-            if not name:
-                name = f"{record.dataset_id}.h5ad" if _looks_h5ad(filetype, url) else "dataset asset"
-            size = _first_int(asset, "filesize", "file_size", "size", "size_bytes")
             is_h5ad = _looks_h5ad(filetype, name, url)
+            if not name:
+                name = f"{record.dataset_id}.h5ad" if is_h5ad else "dataset asset"
+            size = _first_int(asset, "filesize", "file_size", "size", "size_bytes")
             assets.append(
                 DataAsset(
                     source="CELLxGENE Discover",
@@ -119,13 +122,19 @@ class CellxGeneDiscoverClient:
                     name=name,
                     download_url=url,
                     size_bytes=size,
-                    description=_first_text(asset, "description"),
+                    description=(
+                        "Published source H5AD from CZ CELLxGENE Discover"
+                        if is_h5ad
+                        else _first_text(asset, "description")
+                    ),
                     format="h5ad" if is_h5ad else filetype,
                     access_level="public",
                     is_h5ad=is_h5ad,
                     raw=dict(asset),
                 )
             )
+        # Put the reusable source H5AD first when the API also advertises other assets.
+        assets.sort(key=lambda asset: (not asset.is_h5ad, asset.name.casefold()))
         return assets
 
 
@@ -145,9 +154,10 @@ def _labels(item: Mapping[str, Any], field: str) -> list[str]:
 
 def _search_text(item: Mapping[str, Any]) -> str:
     values: list[str] = [
-        str(item.get("name") or ""),
-        str(item.get("id") or item.get("dataset_id") or ""),
+        str(item.get("title") or item.get("name") or ""),
+        str(item.get("dataset_id") or item.get("id") or ""),
         str(item.get("collection_id") or ""),
+        str(item.get("collection_name") or ""),
     ]
     for field in ("tissue", "disease", "organism", "cell_type", "assay"):
         values.extend(_labels(item, field))
@@ -181,8 +191,8 @@ def _looks_h5ad(*values: str | None) -> bool:
 
 
 def _normalize(item: Mapping[str, Any]) -> DatasetRecord:
-    dataset_id = str(item.get("id") or item.get("dataset_id") or "")
-    title = str(item.get("name") or item.get("title") or dataset_id or "CELLxGENE dataset")
+    dataset_id = str(item.get("dataset_id") or item.get("id") or "")
+    title = str(item.get("title") or item.get("name") or dataset_id or "CELLxGENE dataset")
     tissues = _labels(item, "tissue")
     assays = _labels(item, "assay")
     organisms = _labels(item, "organism")

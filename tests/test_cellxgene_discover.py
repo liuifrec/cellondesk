@@ -8,9 +8,11 @@ from cellondesk.sources.cellxgene_discover import DATASET_INDEX_URL, CellxGeneDi
 def _payload():
     return [
         {
-            "id": "kidney-1",
-            "name": "Human kidney atlas",
+            "dataset_id": "kidney-1",
+            "dataset_version_id": "kidney-version-1",
+            "title": "Human kidney atlas",
             "collection_id": "collection-a",
+            "collection_name": "Kidney collection",
             "cell_count": 120000,
             "tissue": [{"label": "kidney"}],
             "disease": [{"label": "normal"}],
@@ -18,29 +20,38 @@ def _payload():
             "cell_type": [{"label": "endothelial cell"}],
             "assay": [{"label": "10x 3' v3"}],
             "explorer_url": "https://cellxgene.cziscience.com/e/kidney-1.cxg/",
-            "assets": {
-                "dataset_h5ad": {
-                    "url": "https://example.test/kidney-1.h5ad",
+            "assets": [
+                {
+                    "url": "https://datasets.cellxgene.cziscience.com/kidney-version-1.h5ad",
                     "filesize": 123456,
                     "filetype": "H5AD",
                 }
-            },
+            ],
         },
         {
-            "id": "brain-1",
-            "name": "Mouse brain atlas",
+            "dataset_id": "brain-1",
+            "dataset_version_id": "brain-version-1",
+            "title": "Mouse brain atlas",
             "collection_id": "collection-b",
+            "collection_name": "Brain collection",
             "cell_count": 50000,
             "tissue": [{"label": "brain"}],
             "disease": [{"label": "normal"}],
             "organism": [{"label": "Mus musculus"}],
             "cell_type": [{"label": "neuron"}],
             "assay": [{"label": "Smart-seq2"}],
+            "assets": [
+                {
+                    "url": "https://datasets.cellxgene.cziscience.com/brain-version-1.h5ad",
+                    "filesize": 654321,
+                    "filetype": "H5AD",
+                }
+            ],
         },
     ]
 
 
-def test_cellxgene_discover_filters_public_index():
+def test_cellxgene_discover_filters_public_dataset_feed():
     def handler(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == DATASET_INDEX_URL
         return httpx.Response(200, json=_payload())
@@ -57,7 +68,7 @@ def test_cellxgene_discover_filters_public_index():
     assert records[0].portal_url.endswith("kidney-1.cxg/")
 
 
-def test_cellxgene_discover_resolves_h5ad_assets():
+def test_cellxgene_discover_resolves_published_h5ad_asset():
     client = CellxGeneDiscoverClient(transport=httpx.MockTransport(lambda _request: httpx.Response(200)))
     record = DatasetRecord(
         source="CELLxGENE Discover",
@@ -69,9 +80,10 @@ def test_cellxgene_discover_resolves_h5ad_assets():
     client.close()
 
     assert len(assets) == 1
-    assert assets[0].name == "kidney-1.h5ad"
+    assert assets[0].name == "kidney-version-1.h5ad"
     assert assets[0].size_bytes == 123456
     assert assets[0].is_h5ad is True
+    assert assets[0].download_url.endswith("kidney-version-1.h5ad")
 
 
 def test_cellxgene_discover_text_search_and_cell_count_sorting():
