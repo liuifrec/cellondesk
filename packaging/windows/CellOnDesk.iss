@@ -1,6 +1,6 @@
 #define MyAppName "CellOnDesk"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.11.1"
+  #define MyAppVersion "0.11.2"
 #endif
 #define MyAppPublisher "Yu-Chen Liu"
 #define MyAppExeName "CellOnDesk.exe"
