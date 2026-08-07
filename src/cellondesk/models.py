@@ -15,6 +15,8 @@ class DatasetRecord(BaseModel):
     status: str | None = None
     organ: str | None = None
     donor_id: str | None = None
+    access_level: str | None = None
     doi_url: str | None = None
     portal_url: str | None = None
+    download_url: str | None = None
     raw: dict[str, Any] = Field(default_factory=dict, repr=False)
