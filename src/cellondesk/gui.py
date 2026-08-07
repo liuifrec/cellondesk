@@ -204,12 +204,10 @@ def main() -> None:
 
             census_available = importlib.util.find_spec("cellxgene_census") is not None
             census_status = QLabel(
-                (
-                    "Native CELLxGENE Census support is available: bounded gene previews are enabled."
-                    if census_available
-                    else "Native CELLxGENE Census/SOMA is not bundled in the Windows installer. "
-                    "Discover search/download above still works; download an H5AD and use Local H5AD."
-                )
+                "Native CELLxGENE Census support is available: bounded gene previews are enabled."
+                if census_available
+                else "Native CELLxGENE Census/SOMA is not bundled in the Windows installer. "
+                "Discover search/download above still works; download an H5AD and use Local H5AD."
             )
             census_status.setWordWrap(True)
             layout.addWidget(census_status)
@@ -605,7 +603,7 @@ def main() -> None:
                 QMessageBox.information(
                     self,
                     "Add a filter",
-                    "Enter a keyword, organ or organism to avoid downloading the entire UCSC catalog.",
+                    "Enter a keyword, organ or organism to avoid downloading the entire UCSC catalog."
                 )
                 return
             try:
