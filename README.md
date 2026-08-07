@@ -1,33 +1,36 @@
 # CellOnDesk
 
-**CellOnDesk** is a local-first browser and command-line toolkit for discovering public single-cell and spatial-omics datasets, inspecting large local H5AD files with bounded memory, and producing portable offline review reports.
+**CellOnDesk** is a local-first browser and command-line toolkit for discovering public single-cell and spatial-omics datasets, acquiring useful source files, inspecting large local H5AD files with bounded memory, and producing portable offline review reports.
 
-> **Status:** technical alpha (`0.11.0` internal Windows desktop preview). The desktop now exposes HuBMAP, UCSC Cell Browser, CELLxGENE entry points, and local H5AD inspection. Real-machine testing, source-vocabulary validation, public release hardening, and broader real-dataset validation are still in progress.
+> **Status:** technical alpha (`0.11.1` internal Windows desktop preview). Real-machine testing, source-vocabulary validation, public-release hardening, and broader real-dataset validation are still in progress.
 
 ## Current capabilities
 
 - Search published HuBMAP datasets with friendly organ aliases such as `kidney` as well as source-native codes such as `LK` and `RK`.
-- Show HuBMAP publication status separately from reported data access level, open selected records in the portal, and export CLT transfer manifests or self-contained HTML summaries.
-- Search the public UCSC Cell Browser catalog by keyword, organ, and organism, then open the selected dataset at its browser/download page.
-- Expose CELLxGENE Discover from the Windows desktop and retain optional native CELLxGENE Census/SOMA bounded gene previews when the Census dependency is installed.
-- Inspect local H5AD structure without loading the full expression matrix.
+- Allow broad HuBMAP organ-only discovery: if the live service cannot return the oversized broad response, CellOnDesk retries across source-native assay types and merges the results.
+- Separate HuBMAP publication status from data access level, resolve verified public H5AD products when available, and offer an official HuBMAP CLT manifest as the bulk-transfer fallback.
+- Search the public CELLxGENE Discover dataset index on native Windows, resolve published file assets, and fall back to the public CELLxGENE Census source-H5AD store without requiring the native SOMA stack.
+- Search the public UCSC Cell Browser catalog by keyword, organ, and organism and resolve available matrix, metadata, coordinate, and H5AD-like files when the source advertises them.
+- Stream public downloads to disk in bounded chunks with progress, cancellation, and partial-file cleanup.
+- Send a downloaded H5AD directly into the Local H5AD workspace for optional immediate inspection.
+- Inspect local H5AD structure without loading the full expression matrix, including modern and older AnnData layouts.
+- Decode legacy AnnData categorical metadata stored as integer codes plus `__categories`, avoiding misleading numeric summaries for fields such as cluster labels or gene symbols.
 - Preview sampled embeddings and one selected gene from dense, CSR, or CSC AnnData matrices.
-- Discover exact CELLxGENE Census metadata labels and precomputed cell counts from Python environments with Census support.
-- Query one exact gene from CELLxGENE Census/SOMA with bounded cell materialization and export provenance-rich JSON or offline HTML reports.
+- Retain optional CELLxGENE Census/SOMA bounded gene previews in Python environments where `cellxgene-census` is installed.
 - Run on Python 3.10+; CI covers Ubuntu, Windows, and macOS and validates a rebuilt wheel.
 
-CellOnDesk is a preview and review tool. It does not replace Scanpy/scverse workflows for clustering, differential expression, integration, trajectory analysis, or statistical inference.
+CellOnDesk is a preview, acquisition, and review tool. It does not replace Scanpy/scverse workflows for clustering, differential expression, integration, trajectory analysis, or statistical inference.
 
 ## Windows desktop preview
 
-The Windows installer is designed for per-user installation without requiring Python, Git, or administrator privileges. The current desktop has four workspaces:
+The Windows installer is designed for per-user installation without requiring Python, Git, or administrator privileges. The desktop has four workspaces:
 
-1. **HuBMAP** — search, inspect access metadata, open selected records, export CLT manifests, and export HTML search summaries.
-2. **CELLxGENE** — open CELLxGENE Discover for dataset search/download; when `cellxgene-census` is available, run bounded Census gene previews directly.
-3. **UCSC Cell Browser** — search the public catalog and open a selected dataset at its browser/download page.
+1. **HuBMAP** — search by ordinary organ name or assay, inspect access metadata, find direct H5AD products, save an official CLT bulk-transfer manifest when direct files are not available, open the portal, and export HTML summaries.
+2. **CELLxGENE** — search Discover by tissue, disease, organism, cell type, or text and download a public H5AD when CellOnDesk can resolve one. Optional Census/SOMA gene previews remain available only when the extra Census dependency is installed.
+3. **UCSC Cell Browser** — search the public catalog and download verified matrix/metadata files where available, with the browser page retained as a fallback.
 4. **Local H5AD** — inspect real AnnData files with bounded memory and export HTML/JSON structural reports.
 
-The packaged native Windows preview intentionally does **not** bundle `cellxgene-census` because the SOMA dependency stack is not a normal native-Windows deployment target. The CELLxGENE tab therefore remains visible and useful: use **Open CELLxGENE Discover** to search/download an H5AD, then inspect that file in **Local H5AD**. Native Census controls activate automatically in environments where the optional Census dependency is available.
+The packaged native Windows preview intentionally does **not** bundle `cellxgene-census` because the SOMA dependency stack is not a normal native-Windows deployment target. CELLxGENE dataset discovery and source-H5AD acquisition do not require that dependency; the optional native Census analysis controls activate automatically in compatible Python environments.
 
 ## Install for routine Python use
 
@@ -50,9 +53,9 @@ pip install -e ".[gui,data]"   # desktop GUI plus local H5AD support
 
 `cellondesk doctor --json diagnostics.json` produces an environment report that can be shared with coworkers.
 
-## HuBMAP discovery
+## HuBMAP discovery and acquisition
 
-The Python/CLI interface accepts the source-native filters, while the desktop additionally resolves common friendly aliases. For example, desktop organ `kidney` searches both left (`LK`) and right (`RK`) kidney records.
+The Python/CLI interface accepts source-native filters, while the desktop additionally resolves common friendly aliases. For example, desktop organ `kidney` searches both left (`LK`) and right (`RK`) kidney records. Leaving assay blank asks CellOnDesk for datasets across assays rather than requiring the user to know the HuBMAP dataset type in advance.
 
 ```bash
 cellondesk search \
@@ -65,13 +68,17 @@ cellondesk search \
   --html hubmap-search.html
 ```
 
-A CLT manifest describes transfer targets; it is **not** itself the dataset. In the desktop, **Get data / transfer** opens the current HuBMAP dataset page so the portal can show the live access/download options and any authorization requirements.
+A HuBMAP CLT manifest describes transfer targets; it is **not** itself the dataset. In the desktop, **Find data products** prefers verified directly downloadable H5AD products. When those are not exposed, the product list can still offer an official one-dataset CLT manifest generated by HuBMAP SearchAPI. Bulk transfer then requires the external HuBMAP CLT, Globus Connect Personal, and the login/access required by HuBMAP.
+
+## CELLxGENE discovery and acquisition
+
+The Windows desktop searches the public CELLxGENE Discover index without SOMA. CellOnDesk first uses file assets directly advertised by Discover. If the lightweight index does not expose an H5AD asset, it can resolve the corresponding source H5AD from the public CELLxGENE Census storage and verify the file before offering it for download.
+
+This download path is distinct from the optional Census/SOMA analytical interface: downloading an H5AD does not require `cellxgene-census` in the Windows installer.
 
 ## UCSC Cell Browser discovery
 
-The desktop adapter reads the public Cell Browser catalog and expands matching collections one level to find datasets. Use ordinary search terms such as `kidney`, an organism such as `Human`, or project/assay keywords. Opening a result takes you to the UCSC Cell Browser dataset page, where the portal exposes its current **Info & Download / Data Download** options.
-
-This adapter is intentionally conservative during the alpha: it does not scrape or guess direct matrix URLs when the portal does not advertise them in the catalog metadata.
+The desktop adapter reads the public Cell Browser catalog and expands matching collections to datasets. Use ordinary search terms such as `kidney`, an organism such as `Human`, or project/assay keywords. CellOnDesk resolves and verifies conventional matrix, metadata, coordinate, and H5AD-like resources when possible; otherwise **Open portal** remains available.
 
 ## Inspect a local H5AD file
 
@@ -83,7 +90,7 @@ cellondesk inspect-h5ad path/to/expr.h5ad \
   --json expr-summary.json
 ```
 
-The inspector tolerates many real-world AnnData layouts and prefers exact annotation-name matches before case-insensitive fallbacks, which helps when messy files contain several fields such as `cell_type`, `Cell_type`, and `Cell_Type`.
+The inspector tolerates many real-world AnnData layouts and prefers exact annotation-name matches before case-insensitive fallbacks. It also decodes older pandas/AnnData categorical storage where values are stored as integer codes and labels live under `__categories`.
 
 ## Preview one local gene
 
@@ -125,6 +132,7 @@ Census outputs record the requested and resolved Census versions, CellOnDesk ver
 
 ## Memory behavior
 
+- Public file downloads are streamed to disk rather than buffered in full memory.
 - Sparse H5AD density is calculated from on-disk shape and non-zero storage.
 - Dense matrices and metadata use bounded samples.
 - Embedding previews contain at most `--max-points` observations.
