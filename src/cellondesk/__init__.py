@@ -1,11 +1,12 @@
 """CellOnDesk public API."""
 
 from . import legacy_feature_compat as _legacy_feature_compat  # noqa: F401
+from .assets import download_asset, format_bytes, iter_download
 from .census_report import render_census_report, write_census_report
 from .diagnostics import DiagnosticCheck, DiagnosticReport, run_diagnostics
 from .expression import GeneExpressionPreview, inspect_gene_expression
 from .h5ad_compat import H5ADInspection, inspect_h5ad
-from .models import DatasetRecord
+from .models import DataAsset, DatasetRecord
 from .sources.cellxgene_discover import CellxGeneDiscoverClient
 from .sources.census import (
     SUPPORTED_CENSUS_VALUE_FIELDS,
@@ -26,6 +27,7 @@ __all__ = [
     "CensusQuery",
     "CensusValueCount",
     "CensusValueResult",
+    "DataAsset",
     "DatasetCitation",
     "DatasetRecord",
     "DiagnosticCheck",
@@ -33,8 +35,11 @@ __all__ = [
     "GeneExpressionPreview",
     "H5ADInspection",
     "UCSCCellBrowserClient",
+    "download_asset",
+    "format_bytes",
     "inspect_gene_expression",
     "inspect_h5ad",
+    "iter_download",
     "list_census_values",
     "preview_census_gene",
     "render_census_report",
