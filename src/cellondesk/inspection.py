@@ -324,12 +324,15 @@ def _matrix_summary(handle: Any, n_obs: int, n_vars: int, np: Any) -> MatrixSumm
 def _choose_annotation(column_names: list[str], requested: str | None) -> str | None:
     if requested:
         return requested if requested in column_names else None
-    lowercase = {name.lower(): name for name in column_names}
     for candidate in _ANNOTATION_CANDIDATES:
-        if candidate in lowercase:
-            return lowercase[candidate]
+        if candidate in column_names:
+            return candidate
+    for candidate in _ANNOTATION_CANDIDATES:
+        for name in column_names:
+            if name.casefold() == candidate.casefold():
+                return name
     for name in column_names:
-        lowered = name.lower()
+        lowered = name.casefold()
         if "cell" in lowered and "type" in lowered:
             return name
     return None
@@ -476,7 +479,8 @@ def inspect_h5ad(
 
         if len(obs_names) > max_obs_columns:
             warnings.append(
-                f"Detailed summaries were limited to {max_obs_columns} of {len(obs_names)} obs columns."
+                f"Detailed summaries include {len(obs_columns)} of {len(obs_names)} obs columns "
+                "(the detected annotation is retained even when it falls beyond the normal limit)."
             )
         if len(var_names) > max_var_columns:
             warnings.append(
