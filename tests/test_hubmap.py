@@ -1,5 +1,6 @@
 import httpx
 
+from cellondesk.models import DatasetRecord
 from cellondesk.sources.hubmap import (
     HuBMAPClient,
     _extract_hits,
@@ -71,6 +72,15 @@ def test_kidney_alias_searches_both_sides_and_deduplicates():
     assert {record.organ for record in records} == {"LK", "RK"}
 
 
+def test_locationless_redirect_is_treated_as_empty_branch():
+    client = HuBMAPClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(303))
+    )
+    records = client.search_datasets(dataset_type="CODEX")
+    client.close()
+    assert records == []
+
+
 def test_search_follows_large_response_redirect():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "example-bucket.test":
@@ -93,3 +103,27 @@ def test_search_follows_large_response_redirect():
     records = client.search_datasets(dataset_type="CODEX")
     client.close()
     assert records[0].dataset_id == "redirected"
+
+
+def test_resolve_assets_checks_record_and_descendant_products():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "HEAD" and request.url.path.endswith("/child/expr.h5ad"):
+            return httpx.Response(200, headers={"content-length": "2048"})
+        return httpx.Response(404)
+
+    client = HuBMAPClient(transport=httpx.MockTransport(handler))
+    record = DatasetRecord(
+        source="HuBMAP",
+        dataset_id="parent",
+        title="Protected parent",
+        access_level="protected",
+        raw={"descendant_ids": ["child"]},
+    )
+    assets = client.resolve_assets(record)
+    client.close()
+
+    assert len(assets) == 1
+    assert assets[0].dataset_id == "child"
+    assert assets[0].name == "expr.h5ad"
+    assert assets[0].size_bytes == 2048
+    assert assets[0].is_h5ad is True
