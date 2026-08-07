@@ -20,6 +20,8 @@ def test_friendly_filter_aliases():
     assert resolve_organ_filters("UT") == ("UT",)
     assert "MERFISH" in resolve_dataset_type_filters("MERFISH")
     assert "RNAseq" in resolve_dataset_type_filters("scRNA-seq")
+    assert "Slideseq" in resolve_dataset_type_filters("Slide-seq")
+    assert "MALDI" in resolve_dataset_type_filters("MALDI IMS")
 
 
 def test_search_normalizes_dataset():
@@ -70,6 +72,37 @@ def test_kidney_alias_searches_both_sides_and_deduplicates():
     records = client.search_datasets(dataset_type="CODEX", organ="kidney")
     client.close()
     assert {record.organ for record in records} == {"LK", "RK"}
+
+
+def test_lazy_organ_search_falls_back_to_narrow_assay_queries():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assay = request.url.params.get("dataset_type")
+        organ = request.url.params.get("origin_samples.organ")
+        if assay is None:
+            return httpx.Response(303)
+        if assay == "RNAseq" and organ == "LK":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "uuid": "rna-lk",
+                        "hubmap_id": "HBM111.ABCD.222",
+                        "dataset_type": "RNAseq",
+                        "status": "Published",
+                        "origin_samples": [{"organ": "LK"}],
+                    }
+                ],
+            )
+        return httpx.Response(404)
+
+    client = HuBMAPClient(transport=httpx.MockTransport(handler))
+    records = client.search_datasets(organ="kidney", limit=1)
+    client.close()
+
+    assert len(records) == 1
+    assert records[0].dataset_id == "rna-lk"
+    assert records[0].dataset_type == "RNAseq"
+    assert records[0].organ == "LK"
 
 
 def test_locationless_redirect_is_treated_as_empty_branch():
