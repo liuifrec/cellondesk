@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 
 from cellondesk.h5ad_report import render_h5ad_report, write_h5ad_report
-from cellondesk.inspection import inspect_h5ad
+from cellondesk.inspection import _choose_annotation, inspect_h5ad
 
 
 def _string_dataset(group: h5py.Group, name: str, values: list[str]) -> h5py.Dataset:
@@ -110,6 +110,12 @@ def test_inspects_sparse_h5ad_without_loading_matrix(tmp_path: Path) -> None:
     assert len(result.embeddings[0].sampled_points) == 4
     assert result.embeddings[0].color_field == "cell_type"
     assert result.uns == ["spatial"]
+
+
+def test_annotation_choice_prefers_exact_name_in_messy_files() -> None:
+    columns = ["Cell_Type", "Cell_type", "cell_type", "leiden"]
+    assert _choose_annotation(columns, None) == "cell_type"
+    assert _choose_annotation(columns, "Cell_Type") == "Cell_Type"
 
 
 def test_h5ad_report_is_self_contained(tmp_path: Path) -> None:
