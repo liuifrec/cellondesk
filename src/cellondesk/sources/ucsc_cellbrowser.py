@@ -43,7 +43,7 @@ class UCSCCellBrowserClient:
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, Mapping):
-            raise ValueError("UCSC Cell Browser returned an unexpected catalog payload")
+            raise TypeError("UCSC Cell Browser returned an unexpected catalog payload")
         return payload
 
     def search_datasets(
@@ -75,7 +75,7 @@ class UCSCCellBrowserClient:
                 continue
             try:
                 payload = self._json(name)
-            except (httpx.HTTPError, ValueError):
+            except (httpx.HTTPError, TypeError):
                 payload = {}
             children = payload.get("datasets", []) if isinstance(payload, Mapping) else []
             if isinstance(children, list) and children:
@@ -166,9 +166,7 @@ def _matches(
         return False
     if organ and organ.strip().casefold() not in haystack:
         return False
-    if organism and organism.strip().casefold() not in haystack:
-        return False
-    return True
+    return not (organism and organism.strip().casefold() not in haystack)
 
 
 def _normalize(item: Mapping[str, Any], path: str) -> DatasetRecord:
