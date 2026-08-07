@@ -147,6 +147,7 @@ class UCSCCellBrowserClient:
                     raw={"relative_path": name},
                 )
             )
+        assets.sort(key=lambda asset: _asset_priority(asset.name))
         return assets
 
     def _probe(self, url: str) -> int | bool | None:
@@ -243,6 +244,20 @@ def _candidate_files(item: Mapping[str, Any]) -> list[str]:
 def _looks_downloadable(value: str) -> bool:
     lower = value.casefold().split("?", 1)[0]
     return lower.endswith(_DOWNLOAD_SUFFIXES)
+
+
+def _asset_priority(name: str) -> tuple[int, str]:
+    """Put analysis-ready/expression files before metadata and coordinates."""
+    lower = name.casefold()
+    if lower.endswith(".h5ad"):
+        return 0, lower
+    if "exprmatrix" in lower or lower.endswith((".mtx", ".mtx.gz", ".loom")):
+        return 1, lower
+    if "meta" in lower:
+        return 2, lower
+    if "coord" in lower or "umap" in lower or "tsne" in lower:
+        return 3, lower
+    return 4, lower
 
 
 def _ucsc_description(name: str) -> str:
