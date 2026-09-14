@@ -10,8 +10,8 @@ import httpx
 
 from ._version import __version__
 from .assets import DownloadCancelled, download_asset, format_bytes
-from .desktop_tasks import run_read_task, run_task
 from .census_report import write_census_report
+from .desktop_tasks import run_read_task, run_task
 from .h5ad_compat import H5ADInspection, inspect_h5ad
 from .h5ad_report import write_h5ad_report
 from .manifest import write_hubmap_manifest
@@ -28,7 +28,7 @@ CELLXGENE_CENSUS_URL = "https://chanzuckerberg.github.io/cellxgene-census/"
 
 def main(*, smoke_test: bool = False) -> None:
     try:
-        from PySide6.QtCore import QTimer, Qt
+        from PySide6.QtCore import Qt, QTimer
         from PySide6.QtWidgets import (
             QApplication,
             QComboBox,
@@ -372,12 +372,12 @@ def main(*, smoke_test: bool = False) -> None:
             return root
 
         def search_hubmap(self) -> None:
-            criteria = dict(
-                dataset_type=self.dataset_type.currentText().strip() or None,
-                organ=self.organ.text().strip() or None,
-                status="Published",
-                limit=self.limit.value(),
-            )
+            criteria = {
+                "dataset_type": self.dataset_type.currentText().strip() or None,
+                "organ": self.organ.text().strip() or None,
+                "status": "Published",
+                "limit": self.limit.value(),
+            }
 
             def query():
                 with HuBMAPClient() as client:
@@ -480,14 +480,14 @@ def main(*, smoke_test: bool = False) -> None:
             self._show_record_details(self.table, self.records, self.details)
 
         def search_cellxgene(self) -> None:
-            criteria = dict(
-                tissue=self.cxg_tissue.text().strip() or None,
-                disease=self.cxg_disease.text().strip() or None,
-                organism=self.cxg_organism.text().strip() or None,
-                cell_type=self.cxg_cell_type.text().strip() or None,
-                query=self.cxg_query.text().strip() or None,
-                limit=self.cxg_limit.value(),
-            )
+            criteria = {
+                "tissue": self.cxg_tissue.text().strip() or None,
+                "disease": self.cxg_disease.text().strip() or None,
+                "organism": self.cxg_organism.text().strip() or None,
+                "cell_type": self.cxg_cell_type.text().strip() or None,
+                "query": self.cxg_query.text().strip() or None,
+                "limit": self.cxg_limit.value(),
+            }
 
             def query():
                 with CellxGeneDiscoverClient() as client:
@@ -584,12 +584,12 @@ def main(*, smoke_test: bool = False) -> None:
             ):
                 QMessageBox.information(self, "Add a filter", "Enter a keyword, organ or organism first.")
                 return
-            criteria = dict(
-                query=self.ucsc_query.text().strip() or None,
-                organ=self.ucsc_organ.text().strip() or None,
-                organism=self.ucsc_organism.text().strip() or None,
-                limit=self.ucsc_limit.value(),
-            )
+            criteria = {
+                "query": self.ucsc_query.text().strip() or None,
+                "organ": self.ucsc_organ.text().strip() or None,
+                "organism": self.ucsc_organism.text().strip() or None,
+                "limit": self.ucsc_limit.value(),
+            }
 
             def query():
                 with UCSCCellBrowserClient() as client:

@@ -315,8 +315,10 @@ def _asset_url(dataset_path: str, filename: str) -> str | None:
     path = unquote(parts.path).replace("\\", "/")
     if any(part == ".." for part in path.split("/")):
         return None
-    if not parts.scheme and not parts.netloc and not path.startswith("/"):
-        if path.startswith(dataset_path.strip("/") + "/"):
-            filename = "/" + filename
+    if (
+        not parts.scheme and not parts.netloc and not path.startswith("/")
+        and path.startswith(dataset_path.strip("/") + "/")
+    ):
+        filename = "/" + filename
     base = f"{ROOT_URL}/{quote(dataset_path.strip('/'), safe='/')}/"
     return urljoin(base, filename)

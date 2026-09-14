@@ -6,10 +6,10 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PySide6")
-from PySide6.QtCore import QThread, QTimer  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QThread, QTimer
+from PySide6.QtWidgets import QApplication
 
-from cellondesk.desktop_tasks import run_read_task, run_task  # noqa: E402
+from cellondesk.desktop_tasks import run_read_task, run_task
 
 
 @pytest.fixture(scope="module")

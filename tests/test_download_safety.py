@@ -19,9 +19,11 @@ def client_for(response):
 def test_existing_file_requires_explicit_overwrite(tmp_path):
     target = tmp_path / "x.h5ad"
     target.write_bytes(b"original")
-    with client_for(httpx.Response(200, content=b"new")) as client:
-        with pytest.raises(FileExistsError):
-            list(iter_download(asset(), target, client=client))
+    with (
+        client_for(httpx.Response(200, content=b"new")) as client,
+        pytest.raises(FileExistsError),
+    ):
+        list(iter_download(asset(), target, client=client))
     assert target.read_bytes() == b"original"
 
 
@@ -29,9 +31,11 @@ def test_existing_file_requires_explicit_overwrite(tmp_path):
 def test_truncation_does_not_replace_existing_file(tmp_path, headers, metadata):
     target = tmp_path / "x.h5ad"
     target.write_bytes(b"original")
-    with client_for(httpx.Response(200, content=b"short", headers=headers)) as client:
-        with pytest.raises(ValueError, match="Incomplete"):
-            list(iter_download(asset(size_bytes=metadata), target, client=client, overwrite=True))
+    with (
+        client_for(httpx.Response(200, content=b"short", headers=headers)) as client,
+        pytest.raises(ValueError, match="Incomplete"),
+    ):
+        list(iter_download(asset(size_bytes=metadata), target, client=client, overwrite=True))
     assert target.read_bytes() == b"original"
     assert not list(tmp_path.glob("*.part"))
 
@@ -76,9 +80,11 @@ def test_mid_transfer_destination_race_never_overwrites(tmp_path):
 @pytest.mark.parametrize("status,headers", [(200, {"content-type": "text/html"}), (206, {})])
 def test_login_and_partial_responses_are_not_saved(tmp_path, status, headers):
     target = tmp_path / "x.h5ad"
-    with client_for(httpx.Response(status, content=b"not a complete file", headers=headers)) as client:
-        with pytest.raises(ValueError, match="complete data file"):
-            list(iter_download(asset(), target, client=client))
+    with (
+        client_for(httpx.Response(status, content=b"not a complete file", headers=headers)) as client,
+        pytest.raises(ValueError, match="complete data file"),
+    ):
+        list(iter_download(asset(), target, client=client))
     assert not target.exists()
 
 
@@ -121,9 +127,11 @@ def test_range_ignoring_server_is_not_buffered(status):
 
 
 def test_probe_server_failure_is_not_no_files():
-    with client_for(httpx.Response(503)) as client:
-        with pytest.raises(httpx.HTTPStatusError):
-            probe_asset(client, "https://example.test/x.h5ad")
+    with (
+        client_for(httpx.Response(503)) as client,
+        pytest.raises(httpx.HTTPStatusError),
+    ):
+        probe_asset(client, "https://example.test/x.h5ad")
 
 
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "https://user:password@example.test/a"])

@@ -23,7 +23,7 @@ def run_task(
     *,
     cancellable: bool = False,
 ) -> T:
-    from PySide6.QtCore import QThread, QTimer, Qt, Signal
+    from PySide6.QtCore import Qt, QThread, QTimer, Signal
     from PySide6.QtWidgets import QDialog, QLabel, QProgressBar, QPushButton, QVBoxLayout
 
     cancelled = Event()
@@ -34,7 +34,7 @@ def run_task(
         def run(self) -> None:
             try:
                 self.result = operation(cancelled.is_set, self.progress.emit)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - re-raised on the calling GUI thread
                 self.error = exc
 
     class ProgressView(QDialog):

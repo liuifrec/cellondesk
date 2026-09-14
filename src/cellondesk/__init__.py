@@ -22,7 +22,6 @@ from .sources.census import (
 from .sources.ucsc_cellbrowser import UCSCCellBrowserClient
 
 __all__ = [
-    "__version__",
     "SUPPORTED_CENSUS_VALUE_FIELDS",
     "CellxGeneDiscoverClient",
     "CensusGenePreview",
@@ -37,6 +36,7 @@ __all__ = [
     "GeneExpressionPreview",
     "H5ADInspection",
     "UCSCCellBrowserClient",
+    "__version__",
     "download_asset",
     "format_bytes",
     "inspect_gene_expression",
