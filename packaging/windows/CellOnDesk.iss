@@ -1,6 +1,6 @@
 #define MyAppName "CellOnDesk"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.11.2"
+  #error "MyAppVersion must be supplied by the packaging workflow"
 #endif
 #define MyAppPublisher "Yu-Chen Liu"
 #define MyAppExeName "CellOnDesk.exe"
@@ -15,7 +15,7 @@ DefaultGroupName=CellOnDesk
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\..\installer
-OutputBaseFilename=CellOnDesk-Setup-x64
+OutputBaseFilename=CellOnDesk-{#MyAppVersion}-Setup-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

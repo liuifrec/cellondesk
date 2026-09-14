@@ -173,12 +173,23 @@ def _sample_indices(length: int, maximum: int, np: Any) -> Any:
     return np.unique(np.linspace(0, length - 1, maximum, dtype=int))
 
 
+def _read_categories(categories: Any, codes: Any, np: Any) -> list[Any]:
+    """Read only category labels needed by the sampled codes."""
+    if not np.issubdtype(codes.dtype, np.integer):
+        raise ValueError("Categorical codes must be integers")
+    if np.any(codes < -1) or np.any(codes >= len(categories)):
+        raise ValueError("Categorical codes are outside the category dictionary")
+    wanted = np.unique(codes[codes >= 0]).astype(np.int64)
+    labels = _decode_array(categories[wanted]) if len(wanted) else []
+    lookup = dict(zip(wanted.tolist(), labels))
+    return [lookup[int(code)] if int(code) >= 0 else None for code in codes]
+
+
 def _read_node_values(node: Any, indices: Any, np: Any) -> list[Any]:
     encoding = _encoding(node)
     if encoding == "categorical" or (hasattr(node, "keys") and "codes" in node):
-        categories = _decode_array(node["categories"][...])
         codes = np.asarray(node["codes"][indices])
-        return [categories[int(code)] if int(code) >= 0 else None for code in codes]
+        return _read_categories(node["categories"], codes, np)
     if hasattr(node, "keys") and "values" in node:
         values = np.asarray(node["values"][indices])
         mask = np.asarray(node["mask"][indices]) if "mask" in node else None
@@ -214,13 +225,19 @@ def _summarize_column(
     elif hasattr(node, "keys") and "values" in node:
         dtype = str(node["values"].dtype)
 
-    non_missing = [value for value in values if value is not None]
+    # NaN/Inf are missing for numeric summaries, not distinct category values.
+    non_missing = [
+        value for value in values
+        if value is not None and not (
+            isinstance(value, (float, np.floating)) and not np.isfinite(value)
+        )
+    ]
     non_null = len(non_missing)
     encoding = _encoding(node)
 
     numeric_values: list[float] = []
-    numeric = True
-    for value in non_missing:
+    numeric = encoding != "categorical"
+    for value in non_missing if numeric else []:
         if isinstance(value, (bool, str, bytes)):
             numeric = False
             break
@@ -230,7 +247,7 @@ def _summarize_column(
             numeric = False
             break
 
-    if numeric and numeric_values:
+    if numeric and (numeric_values or dtype.startswith(("float", "int", "uint"))):
         array = np.asarray(numeric_values, dtype=float)
         finite = array[np.isfinite(array)]
         if finite.size:
@@ -257,15 +274,18 @@ def _summarize_column(
             numeric=numeric_summary,
         )
 
-    labels = ["Missing" if value is None else str(value) for value in values]
+    labels = [str(value) for value in non_missing]
     counts = Counter(labels)
+    unique = len(counts)
+    if len(non_missing) < len(values):
+        counts["Missing"] += len(values) - len(non_missing)
     return ColumnSummary(
         name=name,
         dtype=dtype,
         encoding=encoding,
         sampled=sampled,
         non_null=non_null,
-        unique=len(counts) - int("Missing" in counts),
+        unique=unique,
         top_values=[
             ValueCount(value=value, count=count)
             for value, count in counts.most_common(max_top_values)
@@ -295,7 +315,7 @@ def _matrix_summary(handle: Any, n_obs: int, n_vars: int, np: Any) -> MatrixSumm
             dtype=str(data.dtype),
             nnz=nnz,
             density=(nnz / total) if total else None,
-            sample_nonzero=int(finite.size),
+            sample_nonzero=int(np.count_nonzero(finite)),
             sample_total=int(finite.size),
             sample_minimum=float(np.min(finite)) if finite.size else None,
             sample_maximum=float(np.max(finite)) if finite.size else None,
@@ -351,7 +371,7 @@ def _embedding_previews(
         return [], warnings
     obsm = handle["obsm"]
     keys = list(obsm.keys())
-    priority = {"X_umap": 0, "spatial": 1, "X_tsne": 2, "X_pca": 3}
+    priority = {"X_umap": 0, "spatial": 1, "X_spatial": 1, "X_tsne": 2, "X_pca": 3}
     keys.sort(key=lambda key: (priority.get(key, 10), key))
     indices = _sample_indices(n_obs, max_points, np)
     color_values: list[str] = []
@@ -361,10 +381,16 @@ def _embedding_previews(
 
     previews: list[EmbeddingPreview] = []
     for key in keys:
+        if key.casefold().startswith("velocity"):
+            warnings.append(f"Excluded vector field {key!r} from coordinate embeddings.")
+            continue
         node = obsm[key]
         shape = _shape_from_node(node)
         if not hasattr(node, "dtype") or len(shape) != 2 or shape[1] < 2:
             warnings.append(f"Skipped unsupported embedding {key!r} with shape {shape or 'unknown'}.")
+            continue
+        if shape[0] != n_obs:
+            warnings.append(f"Skipped embedding {key!r}: row count does not match observations.")
             continue
         try:
             coordinates = np.asarray(node[indices, :2], dtype=float)
@@ -477,7 +503,7 @@ def inspect_h5ad(
         )
         warnings.extend(embedding_warnings)
 
-        if len(obs_names) > max_obs_columns:
+        if len(obs_names) > len(obs_columns):
             warnings.append(
                 f"Detailed summaries include {len(obs_columns)} of {len(obs_names)} obs columns "
                 "(the detected annotation is retained even when it falls beyond the normal limit)."

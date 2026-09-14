@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -152,10 +151,9 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _cellondesk_version() -> str:
-    try:
-        return version("cellondesk")
-    except PackageNotFoundError:  # pragma: no cover - source checkout
-        return "0.11.0"
+    from cellondesk._version import __version__
+
+    return __version__
 
 
 def _resolve_census_version(census: Any, requested: str) -> str:

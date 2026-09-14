@@ -112,7 +112,7 @@ table{{width:100%;border-collapse:collapse}}th,td{{padding:9px 10px;border-botto
 <div class="card metric"><strong>{inspection.n_obs:,}</strong><span>Cells / observations</span></div>
 <div class="card metric"><strong>{inspection.n_vars:,}</strong><span>Genes / variables</span></div>
 <div class="card metric"><strong>{_format_bytes(inspection.file_size_bytes)}</strong><span>File size</span></div>
-<div class="card metric"><strong>{density}</strong><span>Matrix density</span></div>
+<div class="card metric"><strong>{density}</strong><span>Stored-entry density (sparse) / sampled density (dense)</span></div>
 <div class="card metric"><strong>{len(inspection.layers)}</strong><span>Layers</span></div>
 <div class="card metric"><strong>{len(inspection.embeddings)}</strong><span>Previewable embeddings</span></div>
 </div>
@@ -121,7 +121,7 @@ table{{width:100%;border-collapse:collapse}}th,td{{padding:9px 10px;border-botto
 <tr><th>Shape</th><td>{matrix.shape[0]:,} × {matrix.shape[1]:,}</td></tr>
 <tr><th>Encoding</th><td>{_escape(matrix.encoding)}</td></tr>
 <tr><th>Data type</th><td>{_escape(matrix.dtype or 'Not reported')}</td></tr>
-<tr><th>Non-zero entries</th><td>{f'{matrix.nnz:,}' if matrix.nnz is not None else 'Sampled only'}</td></tr>
+<tr><th>Stored entries (may include zeros)</th><td>{f'{matrix.nnz:,}' if matrix.nnz is not None else 'Sampled only'}</td></tr>
 <tr><th>Sample range</th><td>{_format_number(matrix.sample_minimum)} to {_format_number(matrix.sample_maximum)}</td></tr>
 <tr><th>Sample mean</th><td>{_format_number(matrix.sample_mean)}</td></tr>
 </tbody></table></div>

@@ -14,6 +14,8 @@ def _parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Write environment diagnostics as JSON and exit without opening the GUI",
     )
+    parser.add_argument("--smoke-test-gui", action="store_true",
+                        help="Open all desktop tabs, exercise a worker, and exit")
     return parser
 
 
@@ -27,7 +29,7 @@ def main() -> None:
 
     from .gui import main as gui_main
 
-    gui_main()
+    gui_main(smoke_test=args.smoke_test_gui)
 
 
 if __name__ == "__main__":

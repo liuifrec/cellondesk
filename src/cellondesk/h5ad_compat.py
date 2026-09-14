@@ -200,7 +200,7 @@ def _embedding_previews(
         return [], warnings
     obsm = handle["obsm"]
     keys = _container_keys(obsm)
-    priority = {"X_umap": 0, "spatial": 1, "X_tsne": 2, "X_pca": 3}
+    priority = {"X_umap": 0, "spatial": 1, "X_spatial": 1, "X_tsne": 2, "X_pca": 3}
     keys.sort(key=lambda key: (priority.get(key, 10), key))
     indices = _core._sample_indices(n_obs, max_points, np)
 
@@ -213,12 +213,18 @@ def _embedding_previews(
 
     previews: list[EmbeddingPreview] = []
     for key in keys:
+        if key.casefold().startswith("velocity"):
+            warnings.append(f"Excluded vector field {key!r} from coordinate embeddings.")
+            continue
         node = _field(obsm, key)
         shape = _core._shape_from_node(node)
         if not hasattr(node, "dtype") or len(shape) != 2 or shape[1] < 2:
             warnings.append(
                 f"Skipped unsupported embedding {key!r} with shape {shape or 'unknown'}."
             )
+            continue
+        if shape[0] != n_obs:
+            warnings.append(f"Skipped embedding {key!r}: row count does not match observations.")
             continue
         try:
             coordinates = np.asarray(node[indices, :2], dtype=float)
@@ -344,9 +350,9 @@ def inspect_h5ad(
         )
         warnings.extend(embedding_warnings)
 
-        if len(obs_names) > max_obs_columns:
+        if len(obs_names) > len(obs_columns):
             warnings.append(
-                f"Detailed summaries were limited to {max_obs_columns} of "
+                f"Detailed summaries were limited to {len(obs_columns)} of "
                 f"{len(obs_names)} obs columns."
             )
         if len(var_names) > max_var_columns:

@@ -2,7 +2,19 @@
 
 **CellOnDesk** is a local-first browser and command-line toolkit for discovering public single-cell and spatial-omics datasets, acquiring useful source files, inspecting large local H5AD files with bounded memory, and producing portable offline review reports.
 
-> **Status:** technical alpha (`0.11.2` internal Windows desktop preview). Real-machine testing, source-vocabulary validation, public-release hardening, and broader real-dataset validation are still in progress.
+## Reliability update (0.11.3 preview)
+
+This pass hardens acquisition rather than adding another analysis backend:
+
+- Blocking searches, file discovery, downloads and H5AD inspection run in a worker thread. The modal progress view keeps Qt responsive and prevents overlapping actions. Downloads support cooperative cancellation; searches finish their current bounded operation before closing.
+- File probes never consume response bodies, even when a server ignores HTTP Range. Network failures are reported separately from missing files. Downloads use unique temporary files, reject HTML login pages and partial responses, check available byte counts and finalize atomically. The Python download API now requires `overwrite=True` to replace an existing file; the GUI still asks through its Save dialog.
+- UCSC paths are normalized without duplicated collection prefixes, and a selected leaf's metadata is refreshed to find its advertised files. Matrices remain separate from metadata and coordinates; no automatic H5AD conversion is claimed.
+- NaN/Inf values no longer inflate numeric non-null or distinct-value counts. Category dictionaries are sampled by referenced codes. Velocity vector fields remain listed under `obsm` but are not mislabeled as position embeddings.
+- Package and installer versions derive from `src/cellondesk/_version.py`. Windows artifacts include `build-info.json`, a versioned installer filename, and a real GUI launch/worker smoke test. Standard PyInstaller Qt hooks replace the blanket collection of all PySide6 modules.
+
+See [the repository audit](docs/RELIABILITY_AUDIT.md) for tests and remaining gaps.
+
+> **Status:** technical alpha (`0.11.3` internal Windows desktop preview). Real-machine testing, source-vocabulary validation, public-release hardening, and broader real-dataset validation are still in progress.
 
 ## Current capabilities
 
@@ -141,7 +153,7 @@ Census outputs record the requested and resolved Census versions, CellOnDesk ver
 - Dense matrices and metadata use bounded samples.
 - Embedding previews contain at most `--max-points` observations.
 - A local gene preview reads one feature from dense, CSR, or CSC storage.
-- A Census preview materializes one feature and at most `--max-cells` observations.
+- A Census preview limits expression materialization to one feature and `--max-cells` cells. The current optional Census implementation still fetches all matching observation metadata before sampling; its total memory use is not yet bounded by `--max-cells`.
 - Census metadata discovery uses the precomputed summary table rather than scanning cell observations.
 - `uns` values and spatial image pyramids are not loaded.
 - Source files are never modified.

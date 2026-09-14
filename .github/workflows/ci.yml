@@ -1,11 +1,19 @@
 name: CI
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.12"]
@@ -15,6 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
       - run: ruff check .
@@ -27,15 +37,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - id: version
+        run: python -c "import runpy; print('value='+runpy.run_path('src/cellondesk/_version.py')['__version__'])" >> "$GITHUB_OUTPUT"
       - run: python -m pip install --upgrade pip build twine
       - run: python -m build
       - run: python -m twine check dist/*
       - run: python -m pip install --force-reinstall dist/*.whl
       - run: cellondesk doctor --json package-diagnostics.json
-      - run: python -c "import cellondesk; assert cellondesk.__version__ == '0.11.2'"
+      - run: python -c "import cellondesk; from importlib.metadata import version; assert cellondesk.__version__ == version('cellondesk') == '${{ steps.version.outputs.value }}'"
       - uses: actions/upload-artifact@v4
         with:
-          name: cellondesk-0.11.2-packages
+          name: cellondesk-${{ steps.version.outputs.value }}-packages
           path: |
             dist/*
             package-diagnostics.json

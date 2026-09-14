@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+build/
+dist/
+installer/
+*.egg-info/
+*.spec
+*.part
+build-info.json
+packaged-diagnostics.json
+installed-diagnostics.json
+package-diagnostics.json

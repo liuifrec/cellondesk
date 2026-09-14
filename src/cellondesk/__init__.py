@@ -1,6 +1,7 @@
 """CellOnDesk public API."""
 
 from . import legacy_feature_compat as _legacy_feature_compat  # noqa: F401
+from ._version import __version__
 from .assets import download_asset, format_bytes, iter_download
 from .census_report import render_census_report, write_census_report
 from .diagnostics import DiagnosticCheck, DiagnosticReport, run_diagnostics
@@ -21,6 +22,7 @@ from .sources.census import (
 from .sources.ucsc_cellbrowser import UCSCCellBrowserClient
 
 __all__ = [
+    "__version__",
     "SUPPORTED_CENSUS_VALUE_FIELDS",
     "CellxGeneDiscoverClient",
     "CensusGenePreview",
@@ -46,4 +48,3 @@ __all__ = [
     "run_diagnostics",
     "write_census_report",
 ]
-__version__ = "0.11.2"
