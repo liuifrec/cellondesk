@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from cellondesk import __version__
 from cellondesk.sources.census import (
     CensusQuery,
     build_obs_value_filter,
@@ -108,7 +109,7 @@ def test_preview_census_gene_limits_coordinates_and_records_provenance() -> None
     assert result.requested_census_version == "stable"
     assert result.resolved_census_version == "2026-07-01"
     assert result.generated_at_utc
-    assert result.cellondesk_version == "0.11.2"
+    assert result.cellondesk_version == __version__
     assert result.dataset_citations[0].dataset_id == "d1"
     assert result.warnings
 

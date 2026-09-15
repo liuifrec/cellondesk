@@ -1,6 +1,7 @@
 """CellOnDesk public API."""
 
 from . import legacy_feature_compat as _legacy_feature_compat  # noqa: F401
+from ._version import __version__
 from .assets import download_asset, format_bytes, iter_download
 from .census_report import render_census_report, write_census_report
 from .diagnostics import DiagnosticCheck, DiagnosticReport, run_diagnostics
@@ -35,6 +36,7 @@ __all__ = [
     "GeneExpressionPreview",
     "H5ADInspection",
     "UCSCCellBrowserClient",
+    "__version__",
     "download_asset",
     "format_bytes",
     "inspect_gene_expression",
@@ -46,4 +48,3 @@ __all__ = [
     "run_diagnostics",
     "write_census_report",
 ]
-__version__ = "0.11.2"

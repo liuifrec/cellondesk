@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 from typing_extensions import Self
 
+from cellondesk.assets import probe_asset
 from cellondesk.models import DataAsset, DatasetRecord
 
 SEARCH_URL = "https://search.api.hubmapconsortium.org/v3/param-search/datasets"
@@ -172,8 +173,9 @@ class HuBMAPClient:
             # use the service has occasionally emitted an empty location. The
             # caller can then fall back to narrower per-assay requests.
             if not location:
+                self._incomplete_search = True
                 return []
-            response = self._client.get(location)
+            response = self._asset_client.get(str(response.url.join(location)))
         if response.status_code == 404:
             return []
         response.raise_for_status()
@@ -194,6 +196,7 @@ class HuBMAPClient:
         merge them. This makes a lazy query such as organ="kidney" useful while
         retaining exact source-native searches when an assay is specified.
         """
+        self._incomplete_search = False
         bounded_limit = max(1, min(limit, 1000))
         requested_assay = dataset_type.strip() if dataset_type and dataset_type.strip() else None
         organ_filters = resolve_organ_filters(organ)
@@ -222,10 +225,11 @@ class HuBMAPClient:
             return merged[:bounded_limit]
 
         # First try the cheap broad query. If it produces no usable response or
-        # fewer records than requested, narrow by assay to fill the result set.
+        # an unusable redirect, narrow by assay; a valid small result is complete.
         if collect((None,)):
             return merged[:bounded_limit]
-        collect(tuple(HUBMAP_DATASET_TYPES))
+        if self._incomplete_search:
+            collect(tuple(HUBMAP_DATASET_TYPES))
         return merged[:bounded_limit]
 
     def resolve_assets(self, record: DatasetRecord) -> list[DataAsset]:
@@ -264,17 +268,7 @@ class HuBMAPClient:
         return assets
 
     def _probe_asset(self, url: str) -> tuple[int | None, str] | None:
-        try:
-            response = self._asset_client.head(url)
-            if response.status_code in {403, 405}:
-                response = self._asset_client.get(url, headers={"Range": "bytes=0-0"})
-            if response.status_code in {401, 403, 404}:
-                return None
-            response.raise_for_status()
-        except httpx.HTTPError:
-            return None
-        size = _response_size(response)
-        return size, str(response.url)
+        return probe_asset(self._asset_client, url)
 
 
 def _clt_manifest_asset(record: DatasetRecord) -> DataAsset | None:
@@ -310,18 +304,6 @@ def _clt_manifest_asset(record: DatasetRecord) -> DataAsset | None:
     )
 
 
-def _response_size(response: httpx.Response) -> int | None:
-    content_range = response.headers.get("content-range")
-    if content_range and "/" in content_range:
-        total = content_range.rsplit("/", 1)[-1]
-        if total.isdigit():
-            return int(total)
-    content_length = response.headers.get("content-length")
-    if content_length and content_length.isdigit() and response.status_code != 206:
-        return int(content_length)
-    return None
-
-
 def _candidate_dataset_ids(record: DatasetRecord) -> list[str]:
     candidates = [record.dataset_id]
     for key in (
@@ -340,10 +322,12 @@ def _ids(value: Any) -> list[str]:
     if isinstance(value, str):
         return [value]
     if isinstance(value, Mapping):
+        # Only identifiers and explicit relationship containers, not title,
+        # status, assay names, or every other string in descendant metadata.
         own = value.get("uuid") or value.get("id")
         values = [str(own)] if own else []
-        for nested in value.values():
-            values.extend(_ids(nested))
+        for key in ("descendants", "immediate_descendants", "descendant_ids"):
+            values.extend(_ids(value.get(key)))
         return values
     if isinstance(value, list):
         values: list[str] = []

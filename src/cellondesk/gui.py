@@ -4,12 +4,14 @@ import importlib.util
 import json
 import sys
 import webbrowser
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import httpx
 
-from .assets import format_bytes, iter_download
+from ._version import __version__
+from .assets import DownloadCancelled, download_asset, format_bytes
 from .census_report import write_census_report
+from .desktop_tasks import run_read_task, run_task
 from .h5ad_compat import H5ADInspection, inspect_h5ad
 from .h5ad_report import write_h5ad_report
 from .manifest import write_hubmap_manifest
@@ -24,9 +26,9 @@ CELLXGENE_DISCOVER_URL = "https://cellxgene.cziscience.com/datasets"
 CELLXGENE_CENSUS_URL = "https://chanzuckerberg.github.io/cellxgene-census/"
 
 
-def main() -> None:
+def main(*, smoke_test: bool = False) -> None:
     try:
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QTimer
         from PySide6.QtWidgets import (
             QApplication,
             QComboBox,
@@ -38,7 +40,6 @@ def main() -> None:
             QLineEdit,
             QMainWindow,
             QMessageBox,
-            QProgressDialog,
             QPushButton,
             QSpinBox,
             QSplitter,
@@ -55,7 +56,7 @@ def main() -> None:
     class Window(QMainWindow):
         def __init__(self) -> None:
             super().__init__()
-            self.setWindowTitle("CellOnDesk")
+            self.setWindowTitle(f"CellOnDesk {__version__}")
             self.resize(1380, 840)
             self.records: list[DatasetRecord] = []
             self.cellxgene_records: list[DatasetRecord] = []
@@ -371,14 +372,19 @@ def main() -> None:
             return root
 
         def search_hubmap(self) -> None:
-            try:
+            criteria = {
+                "dataset_type": self.dataset_type.currentText().strip() or None,
+                "organ": self.organ.text().strip() or None,
+                "status": "Published",
+                "limit": self.limit.value(),
+            }
+
+            def query():
                 with HuBMAPClient() as client:
-                    self.records = client.search_datasets(
-                        dataset_type=self.dataset_type.currentText().strip() or None,
-                        organ=self.organ.text().strip() or None,
-                        status="Published",
-                        limit=self.limit.value(),
-                    )
+                    return client.search_datasets(**criteria)
+
+            try:
+                self.records = run_read_task(self, "HuBMAP search", query)
             except (httpx.HTTPError, ValueError) as exc:
                 QMessageBox.critical(self, "HuBMAP search failed", str(exc))
                 return
@@ -423,12 +429,14 @@ def main() -> None:
             record = self._selected_record(self.table, self.records, "HuBMAP")
             if record is None:
                 return
-            self.statusBar().showMessage("Resolving HuBMAP data products…")
-            QApplication.processEvents()
-            try:
+
+            def resolve():
                 with HuBMAPClient() as client:
-                    assets = client.resolve_assets(record)
-            except httpx.HTTPError as exc:
+                    return client.resolve_assets(record)
+
+            try:
+                assets = run_read_task(self, "Finding HuBMAP files", resolve)
+            except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
                 QMessageBox.critical(self, "HuBMAP product lookup failed", str(exc))
                 return
             if not assets:
@@ -472,16 +480,21 @@ def main() -> None:
             self._show_record_details(self.table, self.records, self.details)
 
         def search_cellxgene(self) -> None:
-            try:
+            criteria = {
+                "tissue": self.cxg_tissue.text().strip() or None,
+                "disease": self.cxg_disease.text().strip() or None,
+                "organism": self.cxg_organism.text().strip() or None,
+                "cell_type": self.cxg_cell_type.text().strip() or None,
+                "query": self.cxg_query.text().strip() or None,
+                "limit": self.cxg_limit.value(),
+            }
+
+            def query():
                 with CellxGeneDiscoverClient() as client:
-                    self.cellxgene_records = client.search_datasets(
-                        tissue=self.cxg_tissue.text().strip() or None,
-                        disease=self.cxg_disease.text().strip() or None,
-                        organism=self.cxg_organism.text().strip() or None,
-                        cell_type=self.cxg_cell_type.text().strip() or None,
-                        query=self.cxg_query.text().strip() or None,
-                        limit=self.cxg_limit.value(),
-                    )
+                    return client.search_datasets(**criteria)
+
+            try:
+                self.cellxgene_records = run_read_task(self, "CELLxGENE search", query)
             except (httpx.HTTPError, TypeError, ValueError) as exc:
                 QMessageBox.critical(self, "CELLxGENE Discover search failed", str(exc))
                 return
@@ -509,8 +522,16 @@ def main() -> None:
             record = self._selected_record(self.cxg_table, self.cellxgene_records, "CELLxGENE")
             if record is None:
                 return
-            with CellxGeneDiscoverClient() as client:
-                assets = client.resolve_assets(record)
+
+            def resolve():
+                with CellxGeneDiscoverClient() as client:
+                    return client.resolve_assets(record)
+
+            try:
+                assets = run_read_task(self, "Finding CELLxGENE files", resolve)
+            except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
+                QMessageBox.critical(self, "CELLxGENE product lookup failed", str(exc))
+                return
             if not assets:
                 self._no_assets(
                     record,
@@ -535,7 +556,9 @@ def main() -> None:
                 max_cells=self.census_max_cells.value(),
             )
             try:
-                self.census_preview = preview_census_gene(query)
+                self.census_preview = run_read_task(
+                    self, "Census gene preview", lambda: preview_census_gene(query)
+                )
             except (RuntimeError, ValueError, OSError) as exc:
                 QMessageBox.critical(self, "CELLxGENE Census preview failed", str(exc))
                 return
@@ -561,14 +584,19 @@ def main() -> None:
             ):
                 QMessageBox.information(self, "Add a filter", "Enter a keyword, organ or organism first.")
                 return
-            try:
+            criteria = {
+                "query": self.ucsc_query.text().strip() or None,
+                "organ": self.ucsc_organ.text().strip() or None,
+                "organism": self.ucsc_organism.text().strip() or None,
+                "limit": self.ucsc_limit.value(),
+            }
+
+            def query():
                 with UCSCCellBrowserClient() as client:
-                    self.ucsc_records = client.search_datasets(
-                        query=self.ucsc_query.text().strip() or None,
-                        organ=self.ucsc_organ.text().strip() or None,
-                        organism=self.ucsc_organism.text().strip() or None,
-                        limit=self.ucsc_limit.value(),
-                    )
+                    return client.search_datasets(**criteria)
+
+            try:
+                self.ucsc_records = run_read_task(self, "UCSC search", query)
             except (httpx.HTTPError, TypeError, ValueError) as exc:
                 QMessageBox.critical(self, "UCSC Cell Browser search failed", str(exc))
                 return
@@ -596,10 +624,16 @@ def main() -> None:
             record = self._selected_record(self.ucsc_table, self.ucsc_records, "UCSC")
             if record is None:
                 return
-            self.statusBar().showMessage("Resolving UCSC data files…")
-            QApplication.processEvents()
-            with UCSCCellBrowserClient() as client:
-                assets = client.resolve_assets(record)
+
+            def resolve():
+                with UCSCCellBrowserClient() as client:
+                    return client.resolve_assets(record)
+
+            try:
+                assets = run_read_task(self, "Finding UCSC files", resolve)
+            except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
+                QMessageBox.critical(self, "UCSC product lookup failed", str(exc))
+                return
             if not assets:
                 self._no_assets(record, "No directly downloadable matrix or metadata files were verified.")
                 return
@@ -626,40 +660,28 @@ def main() -> None:
             filename, _ = QFileDialog.getSaveFileName(
                 self,
                 f"Save {asset.name}",
-                asset.name,
+                PureWindowsPath(asset.name).name,
                 "H5AD files (*.h5ad);;All files (*)" if asset.is_h5ad else "All files (*)",
             )
             if not filename:
                 return
             destination = Path(filename)
-            progress = QProgressDialog(f"Downloading {asset.name}…", "Cancel", 0, 100, self)
-            progress.setWindowTitle("CellOnDesk download")
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
-            progress.setMinimumDuration(0)
-            iterator = iter_download(asset, destination)
             try:
-                for downloaded, total in iterator:
-                    if progress.wasCanceled():
-                        iterator.close()
-                        self.statusBar().showMessage("Download cancelled")
-                        return
-                    if total:
-                        percent = min(100, int(downloaded * 100 / total))
-                        progress.setValue(percent)
-                        progress.setLabelText(
-                            f"Downloading {asset.name}: {format_bytes(downloaded)} / {format_bytes(total)}"
-                        )
-                    else:
-                        progress.setValue(0)
-                        progress.setLabelText(
-                            f"Downloading {asset.name}: {format_bytes(downloaded)}"
-                        )
-                    QApplication.processEvents()
+                run_task(
+                    self,
+                    f"Downloading {asset.name}",
+                    lambda cancelled, progress: download_asset(
+                        asset, destination, progress=progress,
+                        overwrite=True, cancelled=cancelled,
+                    ),
+                    cancellable=True,
+                )
+            except DownloadCancelled:
+                self.statusBar().showMessage("Download cancelled; destination unchanged")
+                return
             except (httpx.HTTPError, OSError, ValueError) as exc:
-                progress.close()
                 QMessageBox.critical(self, "Download failed", str(exc))
                 return
-            progress.setValue(100)
             self.statusBar().showMessage(f"Downloaded {destination}")
             if asset.is_h5ad or destination.suffix.casefold() == ".h5ad":
                 self._use_downloaded_h5ad(destination)
@@ -671,6 +693,10 @@ def main() -> None:
             self.h5ad_file_label.setText(str(path))
             self.h5ad_inspection = None
             self.h5ad_details.clear()
+            for label in (self.h5ad_shape_label, self.h5ad_matrix_label,
+                          self.h5ad_layers_label, self.h5ad_embeddings_label,
+                          self.h5ad_annotation_label):
+                label.setText("Not inspected")
             self.tabs.setCurrentIndex(3)
             answer = QMessageBox.question(
                 self,
@@ -720,16 +746,22 @@ def main() -> None:
             self.h5ad_file_label.setText(filename)
             self.h5ad_inspection = None
             self.h5ad_details.clear()
+            for label in (self.h5ad_shape_label, self.h5ad_matrix_label,
+                          self.h5ad_layers_label, self.h5ad_embeddings_label,
+                          self.h5ad_annotation_label):
+                label.setText("Not inspected")
 
         def inspect_h5ad_file(self) -> None:
             if self.h5ad_path is None:
                 QMessageBox.information(self, "No file selected", "Choose or download an H5AD first.")
                 return
+            source = self.h5ad_path
+            annotation = self.h5ad_annotation.text().strip() or None
+            max_points = self.h5ad_max_points.value()
             try:
-                self.h5ad_inspection = inspect_h5ad(
-                    self.h5ad_path,
-                    annotation=self.h5ad_annotation.text().strip() or None,
-                    max_points=self.h5ad_max_points.value(),
+                self.h5ad_inspection = run_read_task(
+                    self, "Inspecting local H5AD",
+                    lambda: inspect_h5ad(source, annotation=annotation, max_points=max_points),
                 )
             except (OSError, RuntimeError, ValueError) as exc:
                 QMessageBox.critical(self, "H5AD inspection failed", str(exc))
@@ -742,7 +774,7 @@ def main() -> None:
             matrix = result.matrix
             matrix_text = f"{matrix.encoding}; shape {matrix.shape[0]:,} × {matrix.shape[1]:,}"
             if matrix.nnz is not None:
-                matrix_text += f"; {matrix.nnz:,} non-zero"
+                matrix_text += f"; {matrix.nnz:,} stored entries"
             self.h5ad_matrix_label.setText(matrix_text)
             self.h5ad_layers_label.setText(", ".join(result.layers) or "None")
             self.h5ad_embeddings_label.setText(", ".join(result.obsm) or "None")
@@ -786,4 +818,9 @@ def main() -> None:
     app = QApplication(sys.argv)
     window = Window()
     window.show()
+    if smoke_test:
+        assert window.tabs.count() == 4
+        # Exercise the worker/event-loop boundary in the actual packaged app.
+        assert run_read_task(window, "Desktop smoke test", lambda: 42) == 42
+        QTimer.singleShot(100, app.quit)
     raise SystemExit(app.exec())

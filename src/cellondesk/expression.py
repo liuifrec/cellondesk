@@ -89,9 +89,10 @@ def _node_length(node: Any) -> int:
 def _read_value_block(node: Any, start: int, stop: int, np: Any) -> list[Any]:
     encoding = _encoding(node)
     if encoding == "categorical" or (hasattr(node, "keys") and "codes" in node):
-        categories = _decode_values(node["categories"][...])
+        from .inspection import _read_categories
+
         codes = np.asarray(node["codes"][start:stop])
-        return [categories[int(code)] if int(code) >= 0 else None for code in codes]
+        return _read_categories(node["categories"], codes, np)
     if hasattr(node, "keys") and "values" in node:
         values = np.asarray(node["values"][start:stop])
         mask = np.asarray(node["mask"][start:stop]) if "mask" in node else None

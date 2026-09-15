@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpx
 from typing_extensions import Self
 
+from cellondesk.assets import probe_asset
 from cellondesk.models import DataAsset, DatasetRecord
 
 ROOT_URL = "https://cells.ucsc.edu"
@@ -98,7 +99,7 @@ class UCSCCellBrowserClient:
                     merged = dict(item)
                     merged.update(child)
                     child_name = str(child.get("name") or "").strip("/")
-                    path = f"{name}/{child_name}" if child_name else name
+                    path = _dataset_path(name, child_name)
                     if not _matches(merged, query=query, organ=organ, organism=organism):
                         continue
                     record = _normalize(merged, path)
@@ -120,24 +121,36 @@ class UCSCCellBrowserClient:
 
     def resolve_assets(self, record: DatasetRecord) -> list[DataAsset]:
         """Resolve public matrix/metadata files from Cell Browser dataset metadata."""
-        names = _candidate_files(record.raw)
+        # Child catalogue entries may omit the file inventory; hydrate the leaf.
+        metadata = dict(record.raw)
+        try:
+            metadata.update(self._json(record.dataset_id))
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+        names = _candidate_files(metadata)
         names.extend(_CONVENTIONAL_FILES)
         names = list(dict.fromkeys(name for name in names if name))
         base = record.dataset_id.strip("/")
         assets: list[DataAsset] = []
+        seen: set[str] = set()
         for name in names:
             if not _looks_downloadable(name):
                 continue
-            url = f"{ROOT_URL}/{base}/{name.lstrip('/')}"
+            url = _asset_url(base, name)
+            if url is None or url in seen:
+                continue
+            seen.add(url)
             size = self._probe(url)
             if size is False:
                 continue
-            is_h5ad = name.casefold().endswith(".h5ad")
+            filename = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
+            is_h5ad = filename.casefold().endswith(".h5ad")
             assets.append(
                 DataAsset(
                     source="UCSC Cell Browser",
                     dataset_id=record.dataset_id,
-                    name=name.rsplit("/", 1)[-1],
+                    name=filename,
                     download_url=url,
                     size_bytes=size if isinstance(size, int) else None,
                     description=_ucsc_description(name),
@@ -151,22 +164,8 @@ class UCSCCellBrowserClient:
         return assets
 
     def _probe(self, url: str) -> int | bool | None:
-        try:
-            response = self._client.head(url)
-            if response.status_code == 405:
-                response = self._client.get(url, headers={"Range": "bytes=0-0"})
-            if response.status_code == 404:
-                return False
-            response.raise_for_status()
-        except httpx.HTTPError:
-            return False
-        content_range = response.headers.get("content-range")
-        if content_range and "/" in content_range:
-            total = content_range.rsplit("/", 1)[-1]
-            if total.isdigit():
-                return int(total)
-        length = response.headers.get("content-length")
-        return int(length) if length and length.isdigit() and response.status_code != 206 else None
+        result = probe_asset(self._client, url)
+        return False if result is None else result[0]
 
 
 def _values(value: Any) -> list[str]:
@@ -236,7 +235,7 @@ def _matches(
 
 def _candidate_files(item: Mapping[str, Any]) -> list[str]:
     values: list[str] = []
-    for key in ("hasFiles", "files", "downloads", "exprMatrix", "meta", "coords"):
+    for key in ("hasFiles", "files", "downloads", "exprMatrix", "matrixFile", "meta", "metaFile", "coords"):
         values.extend(_values(item.get(key)))
     return [value.strip() for value in values if _looks_downloadable(value.strip())]
 
@@ -294,3 +293,32 @@ def _normalize(item: Mapping[str, Any], path: str) -> DatasetRecord:
 
 
 __all__ = ["UCSCCellBrowserClient"]
+
+
+def _dataset_path(parent: str, child: str) -> str:
+    """A catalogue child can already include its full collection path."""
+    parent, child = parent.strip("/"), child.strip("/")
+    if not child:
+        return parent
+    if child == parent or child.startswith(parent + "/"):
+        return child
+    return f"{parent}/{child}"
+
+
+def _asset_url(dataset_path: str, filename: str) -> str | None:
+    """Resolve advertised relative, root-relative, and absolute asset URLs."""
+    parts = urlsplit(filename)
+    if parts.scheme and parts.scheme not in {"http", "https"}:
+        return None
+    if parts.username or parts.password:
+        return None
+    path = unquote(parts.path).replace("\\", "/")
+    if any(part == ".." for part in path.split("/")):
+        return None
+    if (
+        not parts.scheme and not parts.netloc and not path.startswith("/")
+        and path.startswith(dataset_path.strip("/") + "/")
+    ):
+        filename = "/" + filename
+    base = f"{ROOT_URL}/{quote(dataset_path.strip('/'), safe='/')}/"
+    return urljoin(base, filename)
