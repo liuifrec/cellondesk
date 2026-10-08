@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>$title</title>
+<style>$css</style>
+</head>
+<body>
+<header>
+  <div class="masthead"><span class="brand">◈ CellOnDesk</span><span class="tag">LOCAL H5AD · OFFLINE REPORT</span><span class="version">v$version</span></div>
+  <h1>$title</h1><p class="filename">$file_name</p>
+  <p>Explore the data you have. Keep the limits in view.</p>
+</header>
+<nav aria-label="Dashboard sections" role="tablist">
+  <button id="tab-summary" class="active" data-tab="summary" role="tab" aria-selected="true" aria-controls="summary">Overview</button>
+  <button id="tab-embeddings" data-tab="embeddings" role="tab" aria-selected="false" aria-controls="embeddings" tabindex="-1">Embeddings</button>
+  <button id="tab-composition" data-tab="composition" role="tab" aria-selected="false" aria-controls="composition" tabindex="-1">Cell composition</button>
+  <button id="tab-qc" data-tab="qc" role="tab" aria-selected="false" aria-controls="qc" tabindex="-1">QC &amp; metadata</button>
+  <button id="tab-metadata" data-tab="metadata" role="tab" aria-selected="false" aria-controls="metadata" tabindex="-1">Column inventory</button>
+  <button id="tab-provenance" data-tab="provenance" role="tab" aria-selected="false" aria-controls="provenance" tabindex="-1">Provenance</button>
+</nav>
+<main>
+  <div class="coverage-banner" id="coverage-banner">$coverage <span>$sampling_note</span></div>
+  <noscript><p class="warning">Enable JavaScript for interactive charts. Static overview, metadata and provenance remain below.</p><style>[hidden]{display:block!important}</style></noscript>
+  <section id="summary" class="tab" role="tabpanel" aria-labelledby="tab-summary">
+    <div class="section-heading"><div><p class="eyebrow">01 / DATASET OVERVIEW</p><h2>What is in this file?</h2></div><span class="muted">Structure and existing annotations</span></div>
+    <div class="metrics grid">
+      <div class="card metric"><span>Observations</span><strong>$n_obs</strong><small>Cells / observation rows</small></div>
+      <div class="card metric"><span>Variables</span><strong>$n_vars</strong><small>Features / variable rows</small></div>
+      <div class="card metric"><span>Metadata rows inspected</span><strong>$sample_count</strong><small>Chart denominator before missing values</small></div>
+      <div class="card metric"><span>Source file</span><strong>$file_size</strong><small>Inspected locally, read-only</small></div>
+    </div>
+    <div class="grid two">
+      <article class="card"><h3>Expression matrix</h3><table class="kv"><tbody>$matrix_rows</tbody></table><p class="note">Stored sparse entries can include explicit zeros or duplicate coordinates. Their ratio is not a verified nonzero fraction.</p></article>
+      <article class="card"><h3>Available structures</h3><table class="kv"><tbody>$structures</tbody></table><p class="note">An embedding is a supplied representation. Its first two dimensions are shown without inferring biological meaning, spatial units or image orientation.</p></article>
+    </div>
+    <article class="card warning"><h3>Sampling &amp; integrity notes</h3><ul id="inspection-warnings">$warnings</ul><p class="note">Bounded inspection does not validate every value, sparse pointer or cell identity. It does not establish biological or sequencing quality.</p></article>
+  </section>
+  <section id="embeddings" class="tab" role="tabpanel" aria-labelledby="tab-embeddings" hidden>
+    <div class="section-heading"><div><p class="eyebrow">02 / EMBEDDINGS</p><h2>Explore observation metadata</h2></div></div>
+    <article class="card">
+      <div class="controls"><label>Embedding<select id="embedding-select"></select></label><label>Color by<select id="color-select"></select></label><label>Point size<input id="point-size" type="range" min="1" max="6" value="3" step="0.5"></label><button id="reset-highlight" class="secondary">Clear highlight</button></div>
+      <p id="point-count" class="scope" aria-live="polite"></p>
+      <canvas id="embedding-canvas" width="1100" height="620" role="img" aria-label="Embedding scatter plot"></canvas>
+      <p id="point-detail" class="note" aria-live="polite">Hover over a point for its original observation row and metadata value.</p>
+      <div id="legend" class="legend" aria-label="Color legend"></div><p id="color-note" class="note"></p>
+    </article>
+  </section>
+  <section id="composition" class="tab" role="tabpanel" aria-labelledby="tab-composition" hidden>
+    <div class="section-heading"><div><p class="eyebrow">03 / CELL COMPOSITION</p><h2>Population counts &amp; sample context</h2></div></div>
+    <article class="card">
+      <div class="controls"><label>Annotation<select id="composition-field"></select></label><label>Bar scale<select id="composition-mode"><option value="count">Cell count</option><option value="percent">Percent of inspected rows</option></select></label></div>
+      <p id="composition-scope" class="scope"></p><div id="composition-bars" class="bars" role="img" aria-label="Cell composition"></div>
+      <div class="table-wrap"><table id="composition-table"><caption>Counts and percentages of inspected observation rows</caption></table></div>
+      <p id="composition-note" class="note"></p>
+    </article>
+    <article class="card">
+      <h3>Sample × annotation</h3><div class="controls"><label>Sample / grouping field<select id="sample-field"></select></label><label>Table values<select id="cross-mode"><option value="count">Cell counts</option><option value="percent">Percent within each sample</option></select></label></div>
+      <p id="cross-scope" class="scope"></p><div class="table-wrap"><table id="cross-table"></table></div><p id="cross-note" class="note"></p>
+    </article>
+  </section>
+  <section id="qc" class="tab" role="tabpanel" aria-labelledby="tab-qc" hidden>
+    <div class="section-heading"><div><p class="eyebrow">04 / QC &amp; NUMERIC METADATA</p><h2>Inspect recorded distributions</h2></div></div>
+    <article class="card">
+      <div class="controls"><label>Existing numeric obs field<select id="qc-field"></select></label></div>
+      <p class="note">Values are used as stored. No QC metrics are computed from X, no units are assumed, and no pass/fail thresholds are applied. Numeric metadata is not necessarily a quality measure.</p>
+      <p id="qc-scope" class="scope" aria-live="polite"></p><div id="qc-stats" class="mini-metrics"></div>
+      <div id="qc-chart" class="histogram" role="img" aria-label="Histogram of finite stored metadata values"></div>
+      <details><summary>Histogram counts and bin boundaries</summary><div class="table-wrap"><table id="qc-bins"></table></div></details>
+    </article>
+  </section>
+  <section id="metadata" class="tab" role="tabpanel" aria-labelledby="tab-metadata" hidden>
+    <div class="section-heading"><div><p class="eyebrow">05 / COLUMN INVENTORY</p><h2>Metadata coverage</h2></div></div>
+    <article class="card"><h3>Observation fields</h3><p class="note">$obs_shown of $obs_count fields have detailed summaries. Missing counts include masked and non-finite values.</p><div class="table-wrap"><table><thead><tr><th>Name</th><th>Dtype</th><th>Encoding</th><th>Coverage</th><th>Missing</th><th>Preview</th></tr></thead><tbody>$obs_rows</tbody></table></div></article>
+    <article class="card"><h3>Variable fields</h3><p class="note">$var_shown of $var_count fields have detailed summaries. Top values are truncated previews.</p><div class="table-wrap"><table><thead><tr><th>Name</th><th>Dtype</th><th>Encoding</th><th>Coverage</th><th>Missing</th><th>Preview</th></tr></thead><tbody>$var_rows</tbody></table></div></article>
+  </section>
+  <section id="provenance" class="tab" role="tabpanel" aria-labelledby="tab-provenance" hidden>
+    <div class="section-heading"><div><p class="eyebrow">06 / PROVENANCE</p><h2>Where the report comes from</h2></div></div>
+    <article class="card"><table class="kv"><tbody>$provenance_rows</tbody></table></article>
+    <article class="card"><h3>Reading this report responsibly</h3><p>Metadata charts and embeddings may use different bounded row samples. Every view states its denominator. Non-finite coordinates are excluded from plots; their metadata still contributes to metadata summaries. Missing annotation values remain a separate composition group.</p><p>File size and modification-time checks are recorded, but no full-file checksum is computed. An absence of warnings is not proof of integrity or scientific quality.</p><p>This HTML contains source paths, selected metadata and embedding coordinates. It is self-contained and works without network access; share it with the same care as those annotations.</p></article>
+  </section>
+</main>
+<footer>CellOnDesk · self-contained H5AD inspection · supplied annotations, explicit limits</footer>
+<script type="application/json" id="inspection-data">$payload</script>
+<script>
+(function () {
+"use strict";
+$scripts
+})();
+</script>
+</body>
+</html>

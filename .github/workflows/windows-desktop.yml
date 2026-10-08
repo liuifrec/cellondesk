@@ -51,6 +51,7 @@ jobs:
             --name CellOnDesk `
             --hidden-import h5py `
             --hidden-import numpy `
+            --collect-data cellondesk `
             packaging/windows/launcher.py
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
           Copy-Item build-info.json dist\CellOnDesk\build-info.json

@@ -2,6 +2,22 @@
 
 **CellOnDesk** is a local-first browser and command-line toolkit for discovering public single-cell and spatial-omics datasets, acquiring useful source files, inspecting large local H5AD files with bounded memory, and producing portable offline review reports.
 
+## H5AD dashboard (0.12.0 development milestone)
+
+Local H5AD reports now include a dataset overview, interactive categorical and
+numeric embedding colors, cell-composition bars and sample cross-tabulations,
+histograms of existing numeric metadata, and explicit provenance and integrity
+limits. HTML, CSS and JavaScript are maintained separately and exported as one
+offline HTML file; no network access or browser-side dependencies are required.
+
+Reads remain bounded and support modern and legacy AnnData layouts. Every chart
+states its sample denominator, missing values remain visible, and invalid
+coordinates retain their original row identities for metadata alignment. No QC
+metrics are invented or computed from X. The source H5AD is opened read-only.
+
+See the [architecture and phased implementation](docs/H5AD_DASHBOARD_ARCHITECTURE.md)
+for sampling contracts, validation commands and the remaining milestones.
+
 ## Reliability update (0.11.3 preview)
 
 This pass hardens acquisition rather than adding another analysis backend:
@@ -14,7 +30,7 @@ This pass hardens acquisition rather than adding another analysis backend:
 
 See [the repository audit](docs/RELIABILITY_AUDIT.md) for tests and remaining gaps.
 
-> **Status:** technical alpha (`0.11.3` internal Windows desktop preview). Real-machine testing, source-vocabulary validation, public-release hardening, and broader real-dataset validation are still in progress.
+> **Status:** technical alpha (`0.12.0` development milestone, not a published release). Real-machine testing, source-vocabulary validation, public-release hardening, and broader real-dataset validation are still in progress.
 
 ## Current capabilities
 

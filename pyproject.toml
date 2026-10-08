@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 gui = ["PySide6>=6.7"]
 data = ["h5py>=3.11", "numpy>=1.26"]
+browser = ["playwright>=1.48"]
 census = ["cellxgene-census>=1.15"]
 all = ["h5py>=3.11", "numpy>=1.26", "cellxgene-census>=1.15", "PySide6>=6.7"]
 dev = [

@@ -11,7 +11,7 @@ from .diagnostics import run_diagnostics
 from .expression import inspect_gene_expression
 from .gene_report import write_gene_expression_report
 from .h5ad_compat import inspect_h5ad as inspect_h5ad_file
-from .h5ad_report import write_h5ad_report
+from .h5ad_report import validate_export_destination, write_h5ad_report
 from .manifest import write_hubmap_manifest
 from .report import write_html_report
 from .sources.census import CensusQuery, list_census_values, preview_census_gene
@@ -89,6 +89,9 @@ def inspect_h5ad_command(
     max_points: Annotated[int, typer.Option(min=1, max=50000)] = 5000,
 ) -> None:
     inspection = inspect_h5ad_file(path, max_points=max_points, annotation=annotation)
+    for destination in (json_output, html_report):
+        if destination is not None:
+            validate_export_destination(inspection, destination)
     typer.echo(
         f"{inspection.file_name}: {inspection.n_obs:,} observations x "
         f"{inspection.n_vars:,} variables; {len(inspection.embeddings)} embeddings"

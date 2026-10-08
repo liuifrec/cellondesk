@@ -13,7 +13,7 @@ from .assets import DownloadCancelled, download_asset, format_bytes
 from .census_report import write_census_report
 from .desktop_tasks import run_read_task, run_task
 from .h5ad_compat import H5ADInspection, inspect_h5ad
-from .h5ad_report import write_h5ad_report
+from .h5ad_report import validate_export_destination, write_h5ad_report
 from .manifest import write_hubmap_manifest
 from .models import DataAsset, DatasetRecord
 from .report import write_html_report
@@ -800,7 +800,10 @@ def main(*, smoke_test: bool = False) -> None:
                 "HTML files (*.html)",
             )
             if filename:
-                write_h5ad_report(result, Path(filename))
+                try:
+                    write_h5ad_report(result, Path(filename))
+                except (OSError, ValueError) as exc:
+                    QMessageBox.critical(self, "H5AD export failed", str(exc))
 
         def export_h5ad_json(self) -> None:
             result = self._require_h5ad_inspection()
@@ -813,12 +816,23 @@ def main(*, smoke_test: bool = False) -> None:
                 "JSON files (*.json)",
             )
             if filename:
-                Path(filename).write_text(result.model_dump_json(indent=2), encoding="utf-8")
+                try:
+                    destination = validate_export_destination(result, filename)
+                    destination.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+                except (OSError, ValueError) as exc:
+                    QMessageBox.critical(self, "H5AD export failed", str(exc))
 
     app = QApplication(sys.argv)
     window = Window()
     window.show()
     if smoke_test:
+        from importlib.resources import files
+
+        # Exercise data-file lookup inside the frozen and installed desktop bundles.
+        assets = files("cellondesk").joinpath("report_assets", "h5ad")
+        for name in ("shell.html", "dashboard.css", "core.js", "embeddings.js",
+                     "composition.js", "qc.js", "dashboard.js"):
+            assert assets.joinpath(name).read_text(encoding="utf-8")
         assert window.tabs.count() == 4
         # Exercise the worker/event-loop boundary in the actual packaged app.
         assert run_read_task(window, "Desktop smoke test", lambda: 42) == 42
