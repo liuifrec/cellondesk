@@ -55,6 +55,11 @@ def render_html_report(
         for label, count in missing_fields.items()
         if count
     ]
+    scopes = [record.provenance.get("coverage", {}) for record in items]
+    if any(scope.get("complete") is False for scope in scopes):
+        warnings.append("Search coverage is partial; these records are not all repository matches.")
+    if any(scope.get("truncated") for scope in scopes):
+        warnings.append("A search display limit was applied; distributions describe returned records only.")
     query = dict(query or {})
     generated = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     records_json = json.dumps(

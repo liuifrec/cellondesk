@@ -1,41 +1,47 @@
 # Windows desktop preview
 
-CellOnDesk 0.9.0 adds an automatically built Windows x64 desktop package.
+CellOnDesk includes a native Windows x64 desktop package. The current source
+milestone is 0.12.0; it has not been released by this implementation task.
 
 ## Artifacts
 
 The `Windows desktop package` GitHub Actions workflow produces:
 
-- `CellOnDesk-0.9.0-Windows-x64-portable.zip`
-- `CellOnDesk-Setup-x64.exe`
+- `CellOnDesk-<version>-Windows-x64-portable.zip`
+- `CellOnDesk-<version>-Setup-x64.exe`
 - packaged and installed diagnostics JSON files
 
 The portable ZIP can be extracted and launched directly. The installer performs a per-user installation under `%LOCALAPPDATA%\\Programs\\CellOnDesk`, adds a Start menu shortcut, and optionally adds a desktop shortcut. Administrator rights are not required.
 
 ## Included capabilities
 
-The first Windows package includes:
+The current desktop includes:
 
-- the HuBMAP search desktop interface
+- unified Discovery with common scientific filters, independent source progress,
+  cached catalogs, normalized results and local sorting/filtering
+- HuBMAP, CELLxGENE Discover and UCSC advanced source tabs
 - HuBMAP manifest export
 - portable offline HTML report export
 - bundled Python runtime and GUI dependencies
 - a headless diagnostics mode used for packaging verification
 
-The current GUI does not yet expose local H5AD inspection or CELLxGENE Census controls. Those remain available through the Python command-line installation while they are added to the desktop interface.
+Local H5AD inspection and self-contained offline dashboards are included.
+Optional CELLxGENE Census controls are retained but require a compatible Python
+environment with the Census/SOMA dependency; it is not bundled on native Windows.
+See [discovery architecture and validation](DISCOVERY_ARCHITECTURE.md).
 
 ## Automated validation
 
 The Windows workflow:
 
 1. installs the packaging dependencies on a clean Windows runner;
-2. runs the source test suite;
+2. runs the source and offscreen Qt interaction/screenshot tests;
 3. creates an on-directory PyInstaller application;
-4. runs the packaged executable in diagnostics mode;
+4. runs the packaged executable in diagnostics and real GUI smoke modes;
 5. creates a portable ZIP;
 6. compiles a per-user Inno Setup installer;
 7. silently installs the application to a temporary directory;
-8. runs the installed executable in diagnostics mode;
+8. runs the installed executable in diagnostics and GUI smoke modes;
 9. silently uninstalls it;
 10. uploads the installer, portable package, and diagnostics as workflow artifacts.
 

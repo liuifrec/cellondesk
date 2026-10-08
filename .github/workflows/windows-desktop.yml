@@ -43,6 +43,7 @@ jobs:
       - name: Run source and offscreen GUI tests
         env:
           QT_QPA_PLATFORM: offscreen
+          CELLONDESK_GUI_ARTIFACTS: build/discovery
         run: pytest
       - name: Build portable desktop application
         shell: pwsh
@@ -103,3 +104,4 @@ jobs:
             build-info.json
             packaged-diagnostics.json
             installed-diagnostics.json
+            build/discovery/*.png

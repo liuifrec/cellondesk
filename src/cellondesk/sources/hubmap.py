@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Mapping
+from itertools import zip_longest
 from typing import Any
 
 import httpx
 from typing_extensions import Self
 
 from cellondesk.assets import probe_asset
+from cellondesk.catalog_cache import SearchBudget, SearchStats, SearchStopped, read_json
 from cellondesk.models import DataAsset, DatasetRecord
+from cellondesk.search_metadata import organism_matches, reported_count
 
 SEARCH_URL = "https://search.api.hubmapconsortium.org/v3/param-search/datasets"
 PORTAL_DATASET_URL = "https://portal.hubmapconsortium.org/browse/dataset/{uuid}"
@@ -27,12 +31,8 @@ SPATIAL_DATASET_TYPES = (
     "scRNA-seq / snRNA-seq",
 )
 
-# HuBMAP parameter-search can return an oversized result set through a 303
-# redirect. A broad organ-only query has occasionally returned an empty redirect
-# in real desktop use. When that happens, CellOnDesk retries the same organ
-# across source-native assay types, deduplicating records until the requested
-# limit is reached. Keep common single-cell/spatial types early so lazy searches
-# become useful quickly rather than requiring every type to be queried first.
+# A bounded fallback for oversized parameter-search responses. This static list
+# cannot establish exhaustive assay coverage; fallback results are marked partial.
 HUBMAP_DATASET_TYPES = (
     "RNAseq",
     "RNAseq (with probes)",
@@ -79,8 +79,56 @@ ORGAN_ALIASES: dict[str, tuple[str, ...]] = {
     "kidney left": ("LK",),
     "right kidney": ("RK",),
     "kidney right": ("RK",),
+    "kidney (left)": ("LK",),
+    "kidney (right)": ("RK",),
+    "kidneys": ("LK", "RK"),
+    "renal": ("LK", "RK"),
     "spleen": ("SP",),
+    "adipose tissue": ("AD",),
+    "bladder": ("BL",),
+    "blood": ("BD",),
+    "blood vasculature": ("BV",),
+    "bone marrow": ("BM",),
+    "brain": ("BR",),
+    "heart": ("HT",),
+    "intervertebral disc": ("ID",),
+    "large intestine": ("LI",),
+    "liver": ("LV",),
+    "larynx": ("LA",),
+    "lymph node": ("LY",),
+    "lymphatic vasculature": ("VL",),
+    "pancreas": ("PA",),
+    "placenta": ("PL",),
+    "prostate": ("PR",),
+    "skin": ("SK",),
+    "small intestine": ("SI",),
+    "spinal cord": ("SC",),
+    "sternum": ("ST",),
+    "thymus": ("TH",),
+    "trachea": ("TR",),
+    "uterus": ("UT",),
+    "lung": ("LL", "RL"),
+    "eye": ("LE", "RE"),
+    "bronchus": ("LB", "RB"),
+    "ovary": ("LO", "RO"),
+    "fallopian tube": ("LF", "RF"),
+    "tonsil": ("LT", "RT"),
+    "ureter": ("LU", "RU"),
+    "mammary gland": ("ML", "MR"),
+    "knee": ("LN", "RN"),
+    "mouth": ("MH",),
+    "pelvis": ("PV",),
+    "manubrium": ("MB",),
 }
+
+# Names/codes from the HuBMAP ontology organ list; keep side-specific queries exact.
+for _name, _codes in tuple(ORGAN_ALIASES.items()):
+    if len(_codes) == 2:
+        for _side, _code in zip(("left", "right"), _codes):
+            for _label in (f"{_side} {_name}", f"{_name} {_side}", f"{_name} ({_side})"):
+                ORGAN_ALIASES.setdefault(_label, (_code,))
+    for _code in _codes:
+        ORGAN_ALIASES[_code.casefold()] = (_code,)
 
 ASSAY_ALIASES: dict[str, tuple[str, ...]] = {
     "scrna-seq / snrna-seq": (
@@ -90,7 +138,8 @@ ASSAY_ALIASES: dict[str, tuple[str, ...]] = {
         "snRNAseq",
     ),
     "scrna-seq": ("RNAseq", "scRNA-seq"),
-    "snrna-seq": ("snRNA-seq", "snRNAseq"),
+    "snrna-seq": ("RNAseq", "snRNA-seq", "snRNAseq"),
+    "rna-seq": ("RNAseq", "RNAseq (with probes)", "scRNA-seq", "snRNA-seq", "snRNAseq"),
     "merfish": ("MERFISH", "MERFISH [Salmon]"),
     "slide-seq": ("Slideseq", "Slide-seq"),
     "slideseq": ("Slideseq", "Slide-seq"),
@@ -122,7 +171,11 @@ class HuBMAPClient:
         token: str | None = None,
         timeout: float = 30.0,
         transport: httpx.BaseTransport | None = None,
+        budget: SearchBudget | None = None,
     ) -> None:
+        self.budget = budget
+        self.timeout = timeout
+        self.last_search = SearchStats()
         headers = {"Accept": "application/json"}
         token = token or os.getenv("HUBMAP_TOKEN")
         if token:
@@ -166,20 +219,44 @@ class HuBMAPClient:
         if not params:
             raise ValueError("HuBMAP parameterized search requires at least one filter")
 
-        response = self._client.get(SEARCH_URL, params=params)
-        if response.status_code == 303:
-            location = response.headers.get("location")
-            # HuBMAP documents 303 for responses larger than 10 MB. In real
-            # use the service has occasionally emitted an empty location. The
-            # caller can then fall back to narrower per-assay requests.
-            if not location:
+        stats = self.last_search
+        stats.requests += 1
+        with self._client.stream(
+            "GET", SEARCH_URL, params=params, timeout=min(10, self._budget.remaining())
+        ) as response:
+            if response.status_code == 303:
+                location = response.headers.get("location")
+                if not location:
+                    self._incomplete_search = True
+                    return []
+                # Never forward the authenticated search client's headers to redirects.
+                stats.requests += 1
+                with self._asset_client.stream(
+                    "GET",
+                    str(response.url.join(location)),
+                    timeout=min(10, self._budget.remaining()),
+                ) as redirected:
+                    redirected.raise_for_status()
+                    payload = read_json(redirected, self._budget, stats)
+            elif response.status_code == 404:
+                return []
+            elif response.status_code == 504:
                 self._incomplete_search = True
                 return []
-            response = self._asset_client.get(str(response.url.join(location)))
-        if response.status_code == 404:
-            return []
-        response.raise_for_status()
-        return [_normalize_hit(hit) for hit in _extract_hits(response.json())]
+            else:
+                response.raise_for_status()
+                payload = read_json(response, self._budget, stats)
+        if not isinstance(payload, list) and not (
+            isinstance(payload, Mapping)
+            and (
+                isinstance(payload.get("results"), list)
+                or isinstance(payload.get("hits"), list)
+                or isinstance(payload.get("hits"), Mapping)
+                and isinstance(payload["hits"].get("hits"), list)
+            )
+        ):
+            raise TypeError("HuBMAP returned an unexpected search payload")
+        return [_normalize_hit(hit) for hit in _extract_hits(payload)]
 
     def search_datasets(
         self,
@@ -188,49 +265,104 @@ class HuBMAPClient:
         organ: str | None = None,
         status: str | None = "Published",
         limit: int = 100,
+        query: str | None = None,
+        organism: str | None = None,
     ) -> list[DatasetRecord]:
-        """Search HuBMAP, accepting friendly organ and common assay aliases.
+        """Query every alias before limiting; interleave alias groups fairly.
 
-        When no assay is supplied, try the broad query first. If HuBMAP cannot
-        furnish that response directly, retry source-native assay types and
-        merge them. This makes a lazy query such as organ="kidney" useful while
-        retaining exact source-native searches when an assay is specified.
+        No result-limit early exit: a full left-kidney response must not hide the
+        right kidney. Timeouts/fallback coverage and truncation are explicit.
         """
-        self._incomplete_search = False
+        stats = self.last_search = SearchStats()
+        self._budget = self.budget or SearchBudget(self.timeout)
         bounded_limit = max(1, min(limit, 1000))
-        requested_assay = dataset_type.strip() if dataset_type and dataset_type.strip() else None
-        organ_filters = resolve_organ_filters(organ)
-        merged: list[DatasetRecord] = []
+        groups: list[list[DatasetRecord]] = []
         seen: set[str] = set()
+        fallback_organs = []
+        fatal = None
+        successful = 0
 
-        def collect(assay_values: tuple[str | None, ...]) -> bool:
-            for assay_value in assay_values:
-                for organ_value in organ_filters:
-                    for record in self._search_once(
-                        dataset_type=assay_value,
-                        organ=organ_value,
-                        status=status,
-                    ):
-                        key = record.dataset_id or record.portal_url or record.title
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        merged.append(record)
-                        if len(merged) >= bounded_limit:
-                            return True
-            return False
+        def collect(assay: str | None, organ_value: str | None) -> None:
+            nonlocal successful, fatal
+            self._budget.remaining()
+            self._incomplete_search = False
+            try:
+                records = self._search_once(dataset_type=assay, organ=organ_value, status=status)
+                successful += 1
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                fatal = exc
+                stats.warn(f"Alias {organ_value or 'all organs'} / {assay or 'all assays'}: {exc}")
+                return
+            if self._incomplete_search:
+                if assay is None:
+                    fallback_organs.append(organ_value)
+                else:
+                    stats.warn(f"No usable response for {organ_value} / {assay}.")
+            bucket = []
+            for record in records:
+                self._budget.remaining()
+                stats.scanned += 1
+                if stats.scanned > 100000:
+                    raise SearchStopped("HuBMAP candidate limit reached (100,000 records).")
+                if not organism_matches(record.organism, organism):
+                    continue
+                haystack = " ".join(
+                    str(value or "")
+                    for value in (
+                        record.title,
+                        record.dataset_id,
+                        record.raw.get("hubmap_id"),
+                        record.dataset_type,
+                        record.organ,
+                        record.organism,
+                    )
+                ).casefold()
+                if query and query.strip().casefold() not in haystack:
+                    continue
+                if not record.dataset_id:
+                    stats.warn("HuBMAP entry without a source identifier omitted.")
+                    continue
+                if record.dataset_id in seen:
+                    continue
+                seen.add(record.dataset_id)
+                if len(bucket) < bounded_limit:
+                    bucket.append(record)
+            # Retain at most the displayed limit across previous groups, plus this
+            # bounded bucket. Adding another alias cannot grow old group quotas.
+            groups.append(bucket)
+            keep = {record.dataset_id for record in _interleave(groups, bounded_limit)}
+            for group in groups:
+                group[:] = [record for record in group if record.dataset_id in keep]
 
-        if requested_assay:
-            collect(resolve_dataset_type_filters(requested_assay))
-            return merged[:bounded_limit]
-
-        # First try the cheap broad query. If it produces no usable response or
-        # an unusable redirect, narrow by assay; a valid small result is complete.
-        if collect((None,)):
-            return merged[:bounded_limit]
-        if self._incomplete_search:
-            collect(tuple(HUBMAP_DATASET_TYPES))
-        return merged[:bounded_limit]
+        try:
+            for assay in resolve_dataset_type_filters(dataset_type):
+                for organ_value in resolve_organ_filters(organ):
+                    collect(assay, organ_value)
+            if fallback_organs:
+                stats.warn(
+                    "Broad HuBMAP response unavailable; static assay fallback is not exhaustive."
+                )
+                for assay in HUBMAP_DATASET_TYPES:
+                    for organ_value in fallback_organs:
+                        collect(assay, organ_value)
+        except SearchStopped as exc:
+            stats.warn(str(exc))
+        if fatal is not None and not successful:
+            raise fatal
+        results = _interleave(groups, bounded_limit)
+        stats.matched = len(seen)
+        stats.returned = len(results)
+        stats.truncated = stats.matched > stats.returned
+        for record in results:
+            record.provenance = {
+                "metadata_url": SEARCH_URL,
+                "fetched_at": time.time(),
+                "organ_aliases": list(resolve_organ_filters(organ)),
+                "assay_filter": dataset_type,
+                "status_filter": status,
+                "coverage": stats.scope(),
+            }
+        return results
 
     def resolve_assets(self, record: DatasetRecord) -> list[DataAsset]:
         """Find public H5AD products and an official CLT-manifest fallback."""
@@ -269,6 +401,17 @@ class HuBMAPClient:
 
     def _probe_asset(self, url: str) -> tuple[int | None, str] | None:
         return probe_asset(self._asset_client, url)
+
+
+def _interleave(groups: list[list[DatasetRecord]], limit: int) -> list[DatasetRecord]:
+    results = []
+    for row in zip_longest(*groups):
+        for record in row:
+            if record is not None:
+                results.append(record)
+                if len(results) == limit:
+                    return results
+    return results
 
 
 def _clt_manifest_asset(record: DatasetRecord) -> DataAsset | None:
@@ -346,11 +489,7 @@ def _extract_hits(payload: Any) -> list[Mapping[str, Any]]:
         return [x for x in payload["hits"] if isinstance(x, Mapping)]
     nested = payload.get("hits")
     if isinstance(nested, Mapping) and isinstance(nested.get("hits"), list):
-        return [
-            x.get("_source", x)
-            for x in nested["hits"]
-            if isinstance(x, Mapping)
-        ]
+        return [x.get("_source", x) for x in nested["hits"] if isinstance(x, Mapping)]
     if isinstance(payload.get("results"), list):
         return [x for x in payload["results"] if isinstance(x, Mapping)]
     return []
@@ -372,11 +511,7 @@ def _normalize_hit(hit: Mapping[str, Any]) -> DatasetRecord:
         or "Untitled HuBMAP dataset"
     )
     donor = source.get("donor")
-    donor_id = (
-        donor.get("hubmap_id")
-        if isinstance(donor, Mapping)
-        else source.get("donor_id")
-    )
+    donor_id = donor.get("hubmap_id") if isinstance(donor, Mapping) else source.get("donor_id")
     origin_samples = source.get("origin_samples")
     organ = source.get("organ")
     if not organ and isinstance(origin_samples, list):
@@ -397,6 +532,12 @@ def _normalize_hit(hit: Mapping[str, Any]) -> DatasetRecord:
         access_level=_text(source.get("data_access_level")),
         doi_url=_text(source.get("doi_url") or source.get("registered_doi")),
         portal_url=PORTAL_DATASET_URL.format(uuid=dataset_id) if dataset_id else None,
+        organism=_text(source.get("organism")),
+        reported_cell_count=reported_count(source.get("cell_count")),
+        cell_count_basis="HuBMAP cell_count"
+        if reported_count(source.get("cell_count")) is not None
+        else None,
+        acquisition_methods=["HuBMAP CLT / Globus"] if hubmap_id else [],
         raw=dict(source),
     )
 

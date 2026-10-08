@@ -34,6 +34,13 @@ class DatasetRecord(BaseModel):
     doi_url: str | None = None
     portal_url: str | None = None
     download_url: str | None = None
+    organism: str | None = None
+    reported_cell_count: int | None = None
+    cell_count_basis: str | None = None
+    # Publication status and access_level remain independent of file availability.
+    asset_status: str = "not_checked"
+    acquisition_methods: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
     raw: dict[str, Any] = Field(default_factory=dict, repr=False)
 
 

@@ -10,6 +10,7 @@ import httpx
 
 from ._version import __version__
 from .assets import DownloadCancelled, download_asset, format_bytes
+from .catalog_cache import SearchStats
 from .census_report import write_census_report
 from .desktop_tasks import run_read_task, run_task
 from .h5ad_compat import H5ADInspection, inspect_h5ad
@@ -53,6 +54,8 @@ def main(*, smoke_test: bool = False) -> None:
     except ImportError as exc:
         raise SystemExit('Install GUI dependencies with: pip install "cellondesk[gui]"') from exc
 
+    from .discovery_gui import DiscoveryWidget
+
     class Window(QMainWindow):
         def __init__(self) -> None:
             super().__init__()
@@ -66,12 +69,57 @@ def main(*, smoke_test: bool = False) -> None:
             self.h5ad_path: Path | None = None
 
             self.tabs = QTabWidget()
+            self.discovery = DiscoveryWidget(self)
+            self.discovery.resolve_requested.connect(self.resolve_discovery_files)
+            self.discovery.manifest_requested.connect(self.export_discovery_manifest)
+            self.discovery.portal_requested.connect(
+                lambda record: webbrowser.open(record.portal_url) if record.portal_url else None
+            )
+            self.tabs.addTab(self.discovery, "Discovery")
             self.tabs.addTab(self._build_hubmap_tab(), "HuBMAP")
             self.tabs.addTab(self._build_cellxgene_tab(), "CELLxGENE")
             self.tabs.addTab(self._build_ucsc_tab(), "UCSC Cell Browser")
             self.tabs.addTab(self._build_h5ad_tab(), "Local H5AD")
             self.setCentralWidget(self.tabs)
             self.statusBar().showMessage("Ready")
+
+        def closeEvent(self, event) -> None:
+            self.discovery.shutdown()
+            super().closeEvent(event)
+
+        def resolve_discovery_files(self, record: DatasetRecord) -> None:
+            client_type = {"HuBMAP": HuBMAPClient, "CELLxGENE Discover": CellxGeneDiscoverClient,
+                           "UCSC Cell Browser": UCSCCellBrowserClient}[record.source]
+
+            def resolve():
+                with client_type() as client:
+                    return client.resolve_assets(record)
+
+            try:
+                assets = run_read_task(self, "Finding files for selected dataset", resolve)
+            except (httpx.HTTPError, OSError, ValueError, TypeError, RuntimeError) as exc:
+                QMessageBox.critical(self, "File lookup failed", str(exc))
+                return
+            direct = [asset for asset in assets if not asset.raw.get("transfer_method")]
+            if record.source != "CELLxGENE Discover":
+                record.asset_status = "verified" if direct else "checked_no_direct"
+                if direct and "Direct download (verified)" not in record.acquisition_methods:
+                    record.acquisition_methods.append("Direct download (verified)")
+            self.discovery.set_records(list(self.discovery.model.records))
+            if not assets:
+                self._no_assets(record, "No direct files found among checked candidates. This is not proof of transfer-only access.")
+                return
+            self._download_asset_choice(assets, f"{record.source} files")
+
+        def export_discovery_manifest(self, record: DatasetRecord) -> None:
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Export HuBMAP CLT manifest", "hubmap-manifest.txt", "Text files (*.txt)"
+            )
+            if filename:
+                try:
+                    write_hubmap_manifest([record], Path(filename))
+                except (OSError, ValueError) as exc:
+                    QMessageBox.critical(self, "Manifest export failed", str(exc))
 
         def _build_hubmap_tab(self) -> QWidget:
             root = QWidget()
@@ -381,11 +429,12 @@ def main(*, smoke_test: bool = False) -> None:
 
             def query():
                 with HuBMAPClient() as client:
-                    return client.search_datasets(**criteria)
+                    records = client.search_datasets(**criteria)
+                    return records, client.last_search
 
             try:
-                self.records = run_read_task(self, "HuBMAP search", query)
-            except (httpx.HTTPError, ValueError) as exc:
+                self.records, stats = run_read_task(self, "HuBMAP search", query)
+            except (httpx.HTTPError, ValueError, TypeError, RuntimeError) as exc:
                 QMessageBox.critical(self, "HuBMAP search failed", str(exc))
                 return
             self.table.clearSelection()
@@ -407,7 +456,17 @@ def main(*, smoke_test: bool = False) -> None:
             self.table.resizeColumnsToContents()
             if self.records:
                 self.table.selectRow(0)
-            self.statusBar().showMessage(f"Found {len(self.records)} HuBMAP datasets")
+            self._show_search_status("HuBMAP", stats)
+
+        def _show_search_status(self, source: str, stats: SearchStats) -> None:
+            scope = "catalog/query traversal complete" if stats.complete else "PARTIAL coverage"
+            message = f"{source}: {stats.returned} returned / {stats.matched} matched; {scope}"
+            if stats.truncated:
+                message += "; display limit applied"
+            if stats.warnings:
+                message += "; " + stats.warnings[0]
+            self.statusBar().showMessage(message)
+            self.statusBar().setToolTip("\n".join(stats.warnings))
 
         def selected_records(self) -> list[DatasetRecord]:
             rows = sorted({index.row() for index in self.table.selectedIndexes()})
@@ -491,11 +550,12 @@ def main(*, smoke_test: bool = False) -> None:
 
             def query():
                 with CellxGeneDiscoverClient() as client:
-                    return client.search_datasets(**criteria)
+                    records = client.search_datasets(**criteria)
+                    return records, client.last_search
 
             try:
-                self.cellxgene_records = run_read_task(self, "CELLxGENE search", query)
-            except (httpx.HTTPError, TypeError, ValueError) as exc:
+                self.cellxgene_records, stats = run_read_task(self, "CELLxGENE search", query)
+            except (httpx.HTTPError, TypeError, ValueError, RuntimeError) as exc:
                 QMessageBox.critical(self, "CELLxGENE Discover search failed", str(exc))
                 return
             self.cxg_table.clearSelection()
@@ -516,7 +576,7 @@ def main(*, smoke_test: bool = False) -> None:
             self.cxg_table.resizeColumnsToContents()
             if self.cellxgene_records:
                 self.cxg_table.selectRow(0)
-            self.statusBar().showMessage(f"Found {len(self.cellxgene_records)} CELLxGENE datasets")
+            self._show_search_status("CELLxGENE", stats)
 
         def download_cellxgene_product(self) -> None:
             record = self._selected_record(self.cxg_table, self.cellxgene_records, "CELLxGENE")
@@ -593,11 +653,12 @@ def main(*, smoke_test: bool = False) -> None:
 
             def query():
                 with UCSCCellBrowserClient() as client:
-                    return client.search_datasets(**criteria)
+                    records = client.search_datasets(**criteria)
+                    return records, client.last_search
 
             try:
-                self.ucsc_records = run_read_task(self, "UCSC search", query)
-            except (httpx.HTTPError, TypeError, ValueError) as exc:
+                self.ucsc_records, stats = run_read_task(self, "UCSC search", query)
+            except (httpx.HTTPError, TypeError, ValueError, RuntimeError) as exc:
                 QMessageBox.critical(self, "UCSC Cell Browser search failed", str(exc))
                 return
             self.ucsc_table.clearSelection()
@@ -618,7 +679,7 @@ def main(*, smoke_test: bool = False) -> None:
             self.ucsc_table.resizeColumnsToContents()
             if self.ucsc_records:
                 self.ucsc_table.selectRow(0)
-            self.statusBar().showMessage(f"Found {len(self.ucsc_records)} UCSC datasets")
+            self._show_search_status("UCSC", stats)
 
         def download_ucsc_product(self) -> None:
             record = self._selected_record(self.ucsc_table, self.ucsc_records, "UCSC")
@@ -697,7 +758,7 @@ def main(*, smoke_test: bool = False) -> None:
                           self.h5ad_layers_label, self.h5ad_embeddings_label,
                           self.h5ad_annotation_label):
                 label.setText("Not inspected")
-            self.tabs.setCurrentIndex(3)
+            self.tabs.setCurrentIndex(4)
             answer = QMessageBox.question(
                 self,
                 "H5AD downloaded",
@@ -833,7 +894,7 @@ def main(*, smoke_test: bool = False) -> None:
         for name in ("shell.html", "dashboard.css", "core.js", "embeddings.js",
                      "composition.js", "qc.js", "dashboard.js"):
             assert assets.joinpath(name).read_text(encoding="utf-8")
-        assert window.tabs.count() == 4
+        assert window.tabs.count() == 5
         # Exercise the worker/event-loop boundary in the actual packaged app.
         assert run_read_task(window, "Desktop smoke test", lambda: 42) == 42
         QTimer.singleShot(100, app.quit)
