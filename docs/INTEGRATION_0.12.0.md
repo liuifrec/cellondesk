@@ -28,6 +28,8 @@ packages were preserved in place and excluded from commits.
 | 2 | `9082fff4fe3f63a72ad45869e1878907b29cf887` | Unified discovery; already a coherent commit based on the dashboard |
 | 3 | `69457f271151f4450d39c647bb2fb09133f6b0c3` | Previously uncommitted modality milestone, preserved and committed on its feature branch |
 | 4 | `e95e649bcc19f78570bd27f549131e70b5665d8c` | Integration verification and Windows packaging/diagnostics checks |
+| 5 | `275eb4b1712bc106927d774b45d1b96ef93f82e7` | Explicit UTF-8 test reads and Linux Qt CI runtime dependencies |
+| 6 | `6beb6513b7ab8b20d8b791c0f443a8cadfcd40ce` | Qt test-fixture destruction before application teardown |
 
 The integration branch was created from main, then each milestone was integrated
 in this order with `git merge --ff-only`. No conflict resolution or history
@@ -202,7 +204,7 @@ The report readers in those tests now specify UTF-8; the Qt CI job installs
 `libegl1` and `libopengl0`. Product rendering and scientific semantics are unchanged.
 The first Windows packaging job stopped at the same encoding tests, before
 building an executable. Successful replacement runs and artifacts are recorded
-below when available; a started job is not counted as validation.
+below; a started job is not counted as validation.
 
 The next run passed the Windows encoding checks and all Qt assertions but exposed
 a PySide6 6.12 process-exit crash. This was reproduced locally: the discovery
@@ -211,6 +213,52 @@ It now schedules widget deletion and drains deferred-delete events. Actual
 desktop startup/shutdown passes on 6.12; no production Qt code change or dependency
 pin is needed. Local performance measurements above retain their original 6.11.2
 environment rather than being relabeled as 6.12 measurements.
+
+Downloaded Windows build 21 passed the executable/installer checks, ZIP CRC,
+bundled-asset and package-metadata checks, and both diagnostic records. Visual
+review of its offscreen screenshot nevertheless found missing font glyphs. The
+Windows workflow now explicitly uses Qt's native `windows` platform for source,
+packaged and installed GUI checks. The screenshot test requires glyphs for basic
+UI text, so an unreadable offscreen screenshot can no longer count as successful
+visual verification. Replacement native-platform validation is recorded below
+when complete; build 21 remains an intermediate artifact.
+
+**Initial successful validation head:** `6beb6513b7ab8b20d8b791c0f443a8cadfcd40ce`.
+The entire
+`src/` tree and `pyproject.toml` remain identical to the preserved modality
+milestone. Local main, origin/main and GitHub main still point to `662b58a`.
+
+| GitHub check | Verified outcome |
+| --- | --- |
+| [CI run 37872439047](https://github.com/liuifrec/cellondesk/actions/runs/37872439047) | **Success**: all nine jobs; Python 3.10/3.12 on Linux, macOS and Windows; package build/install/resources; 12 offline browser cases; 53 discovery/Qt cases |
+| [Live HuBMAP run 37872439065](https://github.com/liuifrec/cellondesk/actions/runs/37872439065) | **Success**: live search-to-HTML smoke |
+| [Windows desktop run 37872439008](https://github.com/liuifrec/cellondesk/actions/runs/37872439008) | **Success**: 200 source/Qt tests (12 browser cases run in separate CI), portable build, packaged dependency/version diagnostics and GUI startup, installer build, silent installation, installed diagnostics and GUI startup, uninstall verification |
+
+[Windows artifact: CellOnDesk-0.12.0-Windows-x64-build-21](https://github.com/liuifrec/cellondesk/actions/runs/37872439008/artifacts/11589924966)
+is 128,708,617 bytes. GitHub's artifact archive digest is
+`sha256:8640d3ebc49ef1db0f9fc9a38b7afbf52b17dd23259373783d11d139eb07ee00`.
+It contains the portable ZIP, native x64 installer, `build-info.json` (PR head,
+checkout SHA, version and run identity), packaged/installed diagnostics and a
+a Windows Qt screenshot. Artifact retention currently ends 2027-01-07; this is
+a CI artifact, not a published release. Installer validation is automated on the
+hosted Windows runner, not a claim of manual testing on every Windows machine.
+
+Reviewable CI evidence:
+
+- [Offline dashboard HTML/screenshots](https://github.com/liuifrec/cellondesk/actions/runs/37872439047/artifacts/11590279918)
+  — numeric/categorical embeddings, composition, QC, legacy, spatial and native
+  H5MU views; generated with the browser offline.
+- [Qt discovery screenshot](https://github.com/liuifrec/cellondesk/actions/runs/37872439047/artifacts/11590758922)
+  — selection/details and explicit partial-source state.
+- [Wheel/sdist and diagnostics](https://github.com/liuifrec/cellondesk/actions/runs/37872439047/artifacts/11590649145)
+  — downloaded archives independently confirm eight assets and no generated
+  datasets/build trees.
+
+The Linux validation environment's pre-existing editable distribution metadata
+still reported 0.11.3 even though source code reported 0.12.0. Installed-wheel
+checks used an isolated target and verified actual distribution version 0.12.0;
+Windows checks likewise require that version from the frozen package metadata.
+No success claim relies on the stale editable distribution metadata.
 
 Local reviewed screenshot sets:
 

@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from discovery_fixtures import CatalogFixture
 from PySide6.QtCore import QEvent, Qt, QThread, QTimer
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QApplication
 
 from cellondesk.catalog_cache import SearchStats
@@ -198,6 +199,10 @@ def test_discovery_screenshot_and_partial_scope(widget, app, tmp_path):
     directory = Path(os.environ.get("CELLONDESK_GUI_ARTIFACTS", str(tmp_path)))
     directory.mkdir(parents=True, exist_ok=True)
     screenshot = directory / "discovery-workspace.png"
+    metrics = QFontMetrics(widget.font())
+    assert all(metrics.inFont(character) for character in "CellOnDesk0123456789"), (
+        "Qt cannot render basic UI text with the active platform/font backend"
+    )
     assert widget.grab().save(str(screenshot))
     assert screenshot.stat().st_size > 10000
 

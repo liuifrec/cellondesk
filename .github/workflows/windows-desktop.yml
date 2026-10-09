@@ -41,9 +41,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,packaging]"
-      - name: Run source and offscreen GUI tests
+      - name: Run source and native Windows GUI tests
         env:
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: windows
           CELLONDESK_GUI_ARTIFACTS: build/discovery
         run: pytest
       - name: Build portable desktop application
@@ -61,7 +61,7 @@ jobs:
       - name: Smoke-test packaged executable and GUI
         shell: pwsh
         env:
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: windows
         run: |
           $diagnostics = Join-Path $PWD "packaged-diagnostics.json"
           $process = Start-Process -FilePath "$PWD\dist\CellOnDesk\CellOnDesk.exe" -ArgumentList "--diagnostics", $diagnostics -Wait -PassThru
@@ -86,7 +86,7 @@ jobs:
       - name: Smoke-test installed application and uninstall
         shell: pwsh
         env:
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: windows
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "CellOnDeskInstalled"
           $diagnostics = Join-Path $PWD "installed-diagnostics.json"
