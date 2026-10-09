@@ -7,7 +7,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from discovery_fixtures import CatalogFixture
-from PySide6.QtCore import Qt, QThread, QTimer
+from PySide6.QtCore import QEvent, Qt, QThread, QTimer
 from PySide6.QtWidgets import QApplication
 
 from cellondesk.catalog_cache import SearchStats
@@ -30,6 +30,9 @@ def widget(app):
     yield widget
     widget.shutdown()
     widget.close()
+    # close() only hides the widget; drain deferred destruction before Qt teardown.
+    widget.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def records():

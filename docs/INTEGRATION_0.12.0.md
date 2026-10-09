@@ -204,6 +204,14 @@ The first Windows packaging job stopped at the same encoding tests, before
 building an executable. Successful replacement runs and artifacts are recorded
 below when available; a started job is not counted as validation.
 
+The next run passed the Windows encoding checks and all Qt assertions but exposed
+a PySide6 6.12 process-exit crash. This was reproduced locally: the discovery
+test fixture closed widgets without destroying them before QApplication teardown.
+It now schedules widget deletion and drains deferred-delete events. Actual
+desktop startup/shutdown passes on 6.12; no production Qt code change or dependency
+pin is needed. Local performance measurements above retain their original 6.11.2
+environment rather than being relabeled as 6.12 measurements.
+
 Local reviewed screenshot sets:
 
 - `build/integrated-0.12.0/screenshots/discovery-workspace.png` — Qt sorting,
