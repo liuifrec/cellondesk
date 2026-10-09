@@ -30,6 +30,7 @@ packages were preserved in place and excluded from commits.
 | 4 | `e95e649bcc19f78570bd27f549131e70b5665d8c` | Integration verification and Windows packaging/diagnostics checks |
 | 5 | `275eb4b1712bc106927d774b45d1b96ef93f82e7` | Explicit UTF-8 test reads and Linux Qt CI runtime dependencies |
 | 6 | `6beb6513b7ab8b20d8b791c0f443a8cadfcd40ce` | Qt test-fixture destruction before application teardown |
+| 7 | `f6f821aa765278f8ebf70482b626581ea444c755` | Native Windows GUI validation and font-rendering regression assertion |
 
 The integration branch was created from main, then each milestone was integrated
 in this order with `git merge --ff-only`. No conflict resolution or history
@@ -220,37 +221,55 @@ review of its offscreen screenshot nevertheless found missing font glyphs. The
 Windows workflow now explicitly uses Qt's native `windows` platform for source,
 packaged and installed GUI checks. The screenshot test requires glyphs for basic
 UI text, so an unreadable offscreen screenshot can no longer count as successful
-visual verification. Replacement native-platform validation is recorded below
-when complete; build 21 remains an intermediate artifact.
+visual verification. Successful native-platform validation is recorded below;
+build 21 remains an intermediate artifact.
 
-**Initial successful validation head:** `6beb6513b7ab8b20d8b791c0f443a8cadfcd40ce`.
-The entire
+**Verified code/test/packaging head:** `f6f821aa765278f8ebf70482b626581ea444c755`.
+The report-only follow-up changes no product, tests or packaging code. The entire
 `src/` tree and `pyproject.toml` remain identical to the preserved modality
 milestone. Local main, origin/main and GitHub main still point to `662b58a`.
 
 | GitHub check | Verified outcome |
 | --- | --- |
-| [CI run 37872439047](https://github.com/liuifrec/cellondesk/actions/runs/37872439047) | **Success**: all nine jobs; Python 3.10/3.12 on Linux, macOS and Windows; package build/install/resources; 12 offline browser cases; 53 discovery/Qt cases |
-| [Live HuBMAP run 37872439065](https://github.com/liuifrec/cellondesk/actions/runs/37872439065) | **Success**: live search-to-HTML smoke |
-| [Windows desktop run 37872439008](https://github.com/liuifrec/cellondesk/actions/runs/37872439008) | **Success**: 200 source/Qt tests (12 browser cases run in separate CI), portable build, packaged dependency/version diagnostics and GUI startup, installer build, silent installation, installed diagnostics and GUI startup, uninstall verification |
+| [CI run 37873170293](https://github.com/liuifrec/cellondesk/actions/runs/37873170293) | **Success**: all nine jobs; Python 3.10/3.12 on Linux, macOS and Windows; package build/install/resources; 12 offline browser cases; 53 discovery/Qt cases |
+| [Live HuBMAP run 37873170315](https://github.com/liuifrec/cellondesk/actions/runs/37873170315) | **Success**: live search-to-HTML smoke |
+| [Windows desktop run 37873170302](https://github.com/liuifrec/cellondesk/actions/runs/37873170302) | **Success**: 200 source/Qt tests with native Windows platform and font assertion (12 browser cases run in separate CI), portable build, packaged dependency/version diagnostics and native GUI startup, installer build, silent installation, installed diagnostics and native GUI startup, uninstall verification |
 
-[Windows artifact: CellOnDesk-0.12.0-Windows-x64-build-21](https://github.com/liuifrec/cellondesk/actions/runs/37872439008/artifacts/11589924966)
-is 128,708,617 bytes. GitHub's artifact archive digest is
-`sha256:8640d3ebc49ef1db0f9fc9a38b7afbf52b17dd23259373783d11d139eb07ee00`.
+[Windows artifact: CellOnDesk-0.12.0-Windows-x64-build-22](https://github.com/liuifrec/cellondesk/actions/runs/37873170302/artifacts/11591461153)
+is 128,771,727 bytes. GitHub's artifact archive digest is
+`sha256:bafe225982d81a9e9481aefa62d329915d66b46545068dc5bff57745f27fb7bc`.
 It contains the portable ZIP, native x64 installer, `build-info.json` (PR head,
 checkout SHA, version and run identity), packaged/installed diagnostics and a
 a Windows Qt screenshot. Artifact retention currently ends 2027-01-07; this is
 a CI artifact, not a published release. Installer validation is automated on the
 hosted Windows runner, not a claim of manual testing on every Windows machine.
 
+The downloaded build 22 was independently checked: portable ZIP CRC, eight
+report assets, distribution metadata, embedded build provenance and both
+diagnostic files passed. Its native Windows screenshot was visually reviewed
+and has readable text. Recorded checkout SHA:
+`87f9f4021b78205e6a2a13fc79bb6f361abd830c` (GitHub's temporary PR merge checkout);
+recorded PR head is exactly `f6f821aa765278f8ebf70482b626581ea444c755`.
+This temporary CI checkout did not modify main.
+
+| Downloaded file | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `CellOnDesk-0.12.0-Windows-x64-portable.zip` | 76,832,098 | `942db151a9385b1948fc8e30122644ebbe0e5989ce93d8ae793bfa3a0f9175ad` |
+| `CellOnDesk-0.12.0-Setup-x64.exe` | 52,790,317 | `653d00b10beb84df97d2b4d69e8c85f9a205ebc12716c51bc117153d8e9e904f` |
+
+Local copies are under ignored `build/integrated-0.12.0/windows-build-22/`.
+The compact local `build/integrated-0.12.0/validation-artifacts.zip` groups the
+report, measurements, exported HTML, reviewed screenshots and diagnostics;
+it excludes original datasets, catalog caches and installer/package binaries.
+
 Reviewable CI evidence:
 
-- [Offline dashboard HTML/screenshots](https://github.com/liuifrec/cellondesk/actions/runs/37872439047/artifacts/11590279918)
+- [Offline dashboard HTML/screenshots](https://github.com/liuifrec/cellondesk/actions/runs/37873170293/artifacts/11591535655)
   — numeric/categorical embeddings, composition, QC, legacy, spatial and native
   H5MU views; generated with the browser offline.
-- [Qt discovery screenshot](https://github.com/liuifrec/cellondesk/actions/runs/37872439047/artifacts/11590758922)
+- [Qt discovery screenshot](https://github.com/liuifrec/cellondesk/actions/runs/37873170293/artifacts/11591073681)
   — selection/details and explicit partial-source state.
-- [Wheel/sdist and diagnostics](https://github.com/liuifrec/cellondesk/actions/runs/37872439047/artifacts/11590649145)
+- [Wheel/sdist and diagnostics](https://github.com/liuifrec/cellondesk/actions/runs/37873170293/artifacts/11591320464)
   — downloaded archives independently confirm eight assets and no generated
   datasets/build trees.
 
