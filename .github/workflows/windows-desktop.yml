@@ -4,6 +4,7 @@ on:
     paths:
       - "src/cellondesk/**"
       - "tests/**"
+      - "scripts/check_desktop_diagnostics.py"
       - "packaging/windows/**"
       - "pyproject.toml"
       - ".github/workflows/windows-desktop.yml"
@@ -53,6 +54,7 @@ jobs:
             --hidden-import h5py `
             --hidden-import numpy `
             --collect-data cellondesk `
+            --copy-metadata cellondesk `
             packaging/windows/launcher.py
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
           Copy-Item build-info.json dist\CellOnDesk\build-info.json
@@ -65,6 +67,8 @@ jobs:
           $process = Start-Process -FilePath "$PWD\dist\CellOnDesk\CellOnDesk.exe" -ArgumentList "--diagnostics", $diagnostics -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Packaged diagnostics failed" }
           if (!(Test-Path $diagnostics)) { throw "Packaged diagnostics missing" }
+          python scripts/check_desktop_diagnostics.py $diagnostics --version ${{ steps.version.outputs.value }}
+          if ($LASTEXITCODE -ne 0) { throw "Packaged dependency diagnostics failed" }
           $process = Start-Process -FilePath "$PWD\dist\CellOnDesk\CellOnDesk.exe" -ArgumentList "--smoke-test-gui" -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Packaged GUI smoke failed" }
       - name: Create portable ZIP
@@ -90,6 +94,8 @@ jobs:
           if ($installer.ExitCode -ne 0) { throw "Installer failed" }
           $application = Start-Process -FilePath "$installDir\CellOnDesk.exe" -ArgumentList "--diagnostics", $diagnostics -Wait -PassThru
           if ($application.ExitCode -ne 0 -or !(Test-Path $diagnostics)) { throw "Installed diagnostics failed" }
+          python scripts/check_desktop_diagnostics.py $diagnostics --version ${{ steps.version.outputs.value }}
+          if ($LASTEXITCODE -ne 0) { throw "Installed dependency diagnostics failed" }
           $application = Start-Process -FilePath "$installDir\CellOnDesk.exe" -ArgumentList "--smoke-test-gui" -Wait -PassThru
           if ($application.ExitCode -ne 0) { throw "Installed GUI smoke failed" }
           $uninstall = Start-Process -FilePath "$installDir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
