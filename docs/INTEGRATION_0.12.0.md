@@ -26,7 +26,8 @@ packages were preserved in place and excluded from commits.
 | Base | `662b58a67a2d09fcacde4c335a376e6947510191` | Local main and fetched origin/main agree; all older remote feature refs are ancestors |
 | 1 | `83e23ce889d1541d48afc5c433aab290750620e1` | H5AD scientific dashboard; already a coherent commit based on main |
 | 2 | `9082fff4fe3f63a72ad45869e1878907b29cf887` | Unified discovery; already a coherent commit based on the dashboard |
-| 3 | `69457f2` | Previously uncommitted modality milestone, preserved and committed on its feature branch |
+| 3 | `69457f271151f4450d39c647bb2fb09133f6b0c3` | Previously uncommitted modality milestone, preserved and committed on its feature branch |
+| 4 | `e95e649bcc19f78570bd27f549131e70b5665d8c` | Integration verification and Windows packaging/diagnostics checks |
 
 The integration branch was created from main, then each milestone was integrated
 in this order with `git merge --ff-only`. No conflict resolution or history
@@ -116,7 +117,9 @@ metadata rows. Scientific previews use at most 256 observations. H5MU obsmap
 checks inspect 4,096/20,000 global entries and say **sample-consistent**, never
 fully verified. Global counts are not sums of module counts. The largest single
 matrix selection across these inspections was 13,910 elements. The H5MU check
-independently verified 1,024 sparse stored values; dense IMC/4i each verified 512.
+independently verified 1,024 sparse stored values; IMC, 4i, MERFISH and Visium
+each verified 512. The additional sparse-value checks run outside the GUI timing
+measurement and do not claim a second performance sample.
 
 The mouse-cortex sparse preview reaches its scan budget and exports no partial
 feature values. It reports this explicitly. Its missing feature-type annotations
@@ -191,9 +194,15 @@ source identifiers are in ignored `discovery-{synthetic,live}.json` artifacts.
 
 ## GitHub validation and screenshots
 
-Draft PR, Actions run IDs and Windows artifact verification are recorded here
-after the integrated branch has been tested remotely. Local success does not
-establish native Windows installer behavior.
+[Draft PR #16](https://github.com/liuifrec/cellondesk/pull/16) targets main and
+remains unmerged. The first [CI run](https://github.com/liuifrec/cellondesk/actions/runs/37870334742)
+identified two portability issues: test-side default-encoding reads of UTF-8
+reports failed on Windows, and the Ubuntu Qt runner lacked `libEGL.so.1`.
+The report readers in those tests now specify UTF-8; the Qt CI job installs
+`libegl1` and `libopengl0`. Product rendering and scientific semantics are unchanged.
+The first Windows packaging job stopped at the same encoding tests, before
+building an executable. Successful replacement runs and artifacts are recorded
+below when available; a started job is not counted as validation.
 
 Local reviewed screenshot sets:
 

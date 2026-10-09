@@ -238,7 +238,7 @@ def test_format_dispatch_cli_and_source_export_protection(tmp_path):
         app, ["inspect-scientific", str(path), "--html", str(target), "--modality", "multiomics"]
     )
     assert result.exit_code == 0, result.output
-    assert "H5MU" in target.read_text()
+    assert "H5MU" in target.read_text(encoding="utf-8")
     report = inspect_scientific(path)
     with pytest.raises(ValueError, match="source|H5AD|h5ad"):
         write_h5ad_report(report, path)

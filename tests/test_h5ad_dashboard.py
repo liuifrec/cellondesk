@@ -371,10 +371,10 @@ def test_cli_html_and_json_export_share_the_inspection(tmp_path):
         ],
     )
     assert result.exit_code == 0, result.output
-    payload = H5ADInspection.model_validate_json(json_path.read_text())
+    payload = H5ADInspection.model_validate_json(json_path.read_text(encoding="utf-8"))
     assert payload.provenance.generator_version == "0.12.0"
     assert payload.embeddings[0].candidate_points == 4
-    assert "Sample × annotation" in html_path.read_text()
+    assert "Sample × annotation" in html_path.read_text(encoding="utf-8")
 
 
 def test_nullable_strings_and_booleans_use_masks_not_literal_na(tmp_path):
