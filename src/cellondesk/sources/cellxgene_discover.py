@@ -7,8 +7,9 @@ import httpx
 from typing_extensions import Self
 
 from cellondesk.catalog_cache import CatalogCache, SearchBudget, SearchStats, default_cache_dir
+from cellondesk.modality import assay_profiles
 from cellondesk.models import DataAsset, DatasetRecord
-from cellondesk.search_metadata import organism_matches, reported_count
+from cellondesk.search_metadata import annotate_modalities, organism_matches, reported_count
 
 # This is the same public dataset feed used by the official CELLxGENE Census
 # builder. Unlike the lightweight /dp/v1/datasets/index endpoint, it includes
@@ -57,10 +58,11 @@ class CellxGeneDiscoverClient:
         query: str | None = None,
         assay: str | None = None,
         refresh: bool = False,
+        modalities: tuple[str, ...] = (),
         limit: int = 50,
     ) -> list[DatasetRecord]:
         """Fetch the public dataset feed once, filter locally, and normalize records."""
-        if not any(
+        if not modalities and not any(
             value and value.strip()
             for value in (tissue, disease, organism, cell_type, query, assay)
         ):
@@ -82,6 +84,10 @@ class CellxGeneDiscoverClient:
                 stats.warn("Non-object catalog entry omitted.")
                 continue
             stats.scanned += 1
+            if modalities and not set(modalities).intersection(
+                assay_profiles(", ".join(_labels(item, "assay")))
+            ):
+                continue
             if any(
                 value and value.strip().casefold() not in ", ".join(_labels(item, field)).casefold()
                 for field, value in (
@@ -250,7 +256,7 @@ def _normalize(item: Mapping[str, Any]) -> DatasetRecord:
     raw["normalized_tissues"] = tissues
     raw["normalized_organisms"] = organisms
     raw["normalized_diseases"] = diseases
-    return DatasetRecord(
+    record = DatasetRecord(
         source="CELLxGENE Discover",
         dataset_id=dataset_id,
         title=title,
@@ -268,6 +274,7 @@ def _normalize(item: Mapping[str, Any]) -> DatasetRecord:
         portal_url=portal_url,
         raw=raw,
     )
+    return annotate_modalities(record)
 
 
 __all__ = ["DATASET_INDEX_URL", "CellxGeneDiscoverClient"]

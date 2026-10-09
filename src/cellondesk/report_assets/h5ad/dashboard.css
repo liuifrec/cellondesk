@@ -301,6 +301,15 @@ tfoot {
   max-height:520px;
 }
 
+#correspondence-table th:nth-child(-n+3),
+#correspondence-table td:nth-child(-n+3) {
+  white-space:nowrap;
+}
+
+#spatial-canvas {
+  aspect-ratio:1000 / 520;
+}
+
 .controls {
   display:flex;
   gap:20px;

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from cellondesk.catalog_cache import CatalogCache
 from cellondesk.discovery import DiscoveryService, SearchQuery
+from cellondesk.modality import PROFILE_LABELS
 from cellondesk.sources.cellxgene_discover import CellxGeneDiscoverClient
 from cellondesk.sources.hubmap import HuBMAPClient
 from cellondesk.sources.ucsc_cellbrowser import UCSCCellBrowserClient
@@ -21,6 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="Contact the real public repositories")
     parser.add_argument("--tissue", default="kidney")
+    parser.add_argument("--modality", action="append", choices=list(PROFILE_LABELS), default=[])
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument(
         "--sources",
@@ -47,7 +49,9 @@ def main():
         fixture = CatalogFixture()
         factories = fixture.factories(args.cache_dir)
     service = DiscoveryService(factories=factories, timeout=args.timeout)
-    query = SearchQuery(tissue=args.tissue, sources=tuple(args.sources))
+    query = SearchQuery(
+        tissue=args.tissue, sources=tuple(args.sources), modalities=tuple(args.modality)
+    )
     preexisting = args.cache_dir.exists() and any(args.cache_dir.glob("*.json"))
     report = {
         "mode": "live metadata" if args.live else "synthetic catalog",

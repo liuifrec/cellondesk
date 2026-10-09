@@ -44,7 +44,7 @@ flowchart LR
     Results --> Model[ResultModel + sorting/filter proxy]
     Model --> Details[Selected record / raw metadata / provenance]
     Details --> Files[Explicit selected-file lookup and existing download worker]
-    Files --> H5AD[Unchanged Local H5AD inspection and offline report]
+    Files --> H5AD[Native H5AD / H5MU inspection and offline scientific report]
 ```
 
 - `discovery.py` is Qt-independent. `SearchQuery` holds common and explicitly
@@ -103,6 +103,7 @@ the result retains its full bounded metadata object.
 | Tissue/organ | Exact parameter query for every friendly alias; kidney includes LK and RK | Case-insensitive tissue-label substring | Leaf body-parts/tissue substring; parent metadata is not inherited |
 | Organism | Explicitly reported organism only; missing values do not match | Organism labels | Leaf organism labels/facets |
 | Assay | Exact source values, with documented common aliases | Assay-label substring | Leaf assay-label substring |
+| Scientific modality | Any selected conservative assay hint, before result limits | Any selected assay-label hint, before result limits and using the same cached catalog | Any selected leaf assay hint; collections are traversed regardless of parent modality |
 | Disease/cell type | Unsupported; visibly marked as CELLxGENE-only | Supported label substring | Unsupported; visibly marked as CELLxGENE-only |
 | Publication status | Source-specific advanced filter; default Published | Published public feed only | Not a publication filter |
 
@@ -114,6 +115,23 @@ spatial resolution, age, sex, controlled-access authentication and Census/SOMA
 expressions are not common discovery filters. Existing advanced source tabs and
 optional Census controls remain available. Collapsing the new advanced panel
 disables its filters for the next search.
+
+The modality facet is multi-valued and separate from assay, tissue and organism.
+`reported_modalities` and `modality_evidence` retain assay-derived hints; their
+origin is `source_assay`. Titles and tissues do not assign modalities. Generic
+"multiomics" does not automatically mean RNA+ATAC. Selecting a modality excludes
+unclassified assays, so this is not a complete inventory of that biological
+modality. Clear the facet to include unclassified records. No ontology identifier
+expansion, feature inspection, spatial-unit filter or cross-modality pairing
+filter is implemented.
+
+`file_verified_modalities` remains empty during discovery. `local_inspection_support`
+comes only from advertised filenames/formats and explicitly says contents are
+not checked. H5AD/H5MU have bounded readers; Zarr, OME and imzML labels say
+"Planned". There are no per-result asset probes. File evidence is produced by a
+separate local inspection; this milestone does not automatically attach that
+report back to the remote result or persist verification history.
+See [the scientific profile/capability architecture](MODALITY_ARCHITECTURE.md).
 
 HuBMAP aliases were checked against the
 [official organ ontology endpoint](https://ontology.api.hubmapconsortium.org/organs?application_context=HUBMAP)

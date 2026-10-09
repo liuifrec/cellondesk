@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .modality import ModalityReport
+
 
 class ValueCount(BaseModel):
     value: str
@@ -126,6 +128,8 @@ class H5ADInspection(BaseModel):
     obs_sample: ObservationSample | None = None
     embedding_metadata: ObservationSample | None = None
     provenance: InspectionProvenance | None = None
+    storage_format: str = "H5AD"
+    scientific: ModalityReport | None = None
 
 
 _ANNOTATION_CANDIDATES = (
@@ -455,6 +459,7 @@ def inspect_h5ad(
     max_column_values: int = 20000,
     max_obs_columns: int = 50,
     max_var_columns: int = 30,
+    modality_override: list[str] | tuple[str, ...] | None = None,
 ) -> H5ADInspection:
     """Inspect modern and legacy H5AD files through the shared bounded reader."""
     from .h5ad_compat import inspect_h5ad as inspect
@@ -466,4 +471,5 @@ def inspect_h5ad(
         max_column_values=max_column_values,
         max_obs_columns=max_obs_columns,
         max_var_columns=max_var_columns,
+        modality_override=modality_override,
     )

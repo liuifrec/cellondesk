@@ -12,7 +12,7 @@ from typing_extensions import Self
 from cellondesk.assets import probe_asset
 from cellondesk.catalog_cache import SearchBudget, SearchStats, SearchStopped, read_json
 from cellondesk.models import DataAsset, DatasetRecord
-from cellondesk.search_metadata import organism_matches, reported_count
+from cellondesk.search_metadata import annotate_modalities, organism_matches, reported_count
 
 SEARCH_URL = "https://search.api.hubmapconsortium.org/v3/param-search/datasets"
 PORTAL_DATASET_URL = "https://portal.hubmapconsortium.org/browse/dataset/{uuid}"
@@ -267,6 +267,7 @@ class HuBMAPClient:
         limit: int = 100,
         query: str | None = None,
         organism: str | None = None,
+        modalities: tuple[str, ...] = (),
     ) -> list[DatasetRecord]:
         """Query every alias before limiting; interleave alias groups fairly.
 
@@ -304,6 +305,8 @@ class HuBMAPClient:
                 stats.scanned += 1
                 if stats.scanned > 100000:
                     raise SearchStopped("HuBMAP candidate limit reached (100,000 records).")
+                if modalities and not set(modalities).intersection(record.reported_modalities):
+                    continue
                 if not organism_matches(record.organism, organism):
                     continue
                 haystack = " ".join(
@@ -521,7 +524,7 @@ def _normalize_hit(hit: Mapping[str, Any]) -> DatasetRecord:
             if isinstance(sample, Mapping) and sample.get("organ")
         ]
         organ = organ_values
-    return DatasetRecord(
+    record = DatasetRecord(
         source="HuBMAP",
         dataset_id=dataset_id,
         title=title,
@@ -540,6 +543,7 @@ def _normalize_hit(hit: Mapping[str, Any]) -> DatasetRecord:
         acquisition_methods=["HuBMAP CLT / Globus"] if hubmap_id else [],
         raw=dict(source),
     )
+    return annotate_modalities(record)
 
 
 def _text(value: Any) -> str | None:

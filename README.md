@@ -5,7 +5,7 @@
 ## Unified discovery (0.12.0 development milestone)
 
 The new **Discovery** tab searches HuBMAP, CELLxGENE Discover and UCSC Cell Browser
-with common keyword, tissue, organism and assay controls. Results arrive
+with distinct keyword, tissue, organism, assay and scientific-modality controls. Results arrive
 independently, with source errors, coverage limits and cache/timing information.
 Sort and filter locally, inspect source metadata, then find files or export a
 HuBMAP CLT manifest for the selected dataset. Publication, public access,
@@ -18,10 +18,37 @@ advanced functionality and the H5AD dashboard remain available.
 
 See [discovery architecture, measured latency and remaining limits](docs/DISCOVERY_ARCHITECTURE.md).
 
+## Modality-aware dashboards (0.12.0 development milestone)
+
+The general report now adds evidence-based scientific profiles and a panel
+capability registry. Typed RNA, ATAC, protein and molecular-ion features can
+coexist. Scientific modules show bounded stored feature values, recorded QC,
+spatial coordinates and embedded images when those data exist. Unknown files
+remain unclassified. Coordinates preserve their numeric geometry; images are
+previewed independently because registration has not been validated.
+
+Native H5MU inspection retains module matrices and checks explicit observation
+and feature maps. It does not construct a joint matrix or infer biological
+pairing. Manual profiles record an interpretation without supplying missing data.
+Search modality facets use **assay-derived repository hints**; advertised local
+format support and file-verified evidence remain separate.
+
+```bash
+cellondesk inspect-scientific sample.h5mu --html sample.html --json sample.json
+cellondesk inspect-h5ad ambiguous.h5ad --modality spatial_proteomics --html report.html
+```
+
+The desktop **Local H5AD / H5MU** workspace supports the same reader and optional
+manual profiles. Export remains one self-contained offline HTML file. SpatialData,
+Zarr, OME imaging and imzML readers, calibrated overlays, segmentation,
+neighborhoods and joint multiomic analyses are planned, not implemented here.
+See the [capability matrix, phases and validation](docs/MODALITY_ARCHITECTURE.md)
+and [public fixture provenance](tests/fixtures/public_modalities/README.md).
+
 ## H5AD dashboard (0.12.0 development milestone)
 
 Local H5AD reports now include a dataset overview, interactive categorical and
-numeric embedding colors, cell-composition bars and sample cross-tabulations,
+numeric embedding colors, observation-composition bars and sample cross-tabulations,
 histograms of existing numeric metadata, and explicit provenance and integrity
 limits. HTML, CSS and JavaScript are maintained separately and exported as one
 offline HTML file; no network access or browser-side dependencies are required.
@@ -75,7 +102,7 @@ The Windows installer is designed for per-user installation without requiring Py
 2. **HuBMAP** — search by ordinary organ name or assay, inspect access metadata, find direct H5AD products, save an official CLT bulk-transfer manifest, open the portal, and export HTML summaries.
 3. **CELLxGENE** — search Discover by tissue, disease, organism, cell type, or text and download the published source H5AD advertised by the official dataset feed. Optional Census/SOMA gene previews remain available only when the extra Census dependency is installed.
 4. **UCSC Cell Browser** — search the public catalog and download verified matrix/metadata files where available, with analysis-ready H5AD/expression resources listed before metadata and coordinate-only files and the browser page retained as a fallback.
-5. **Local H5AD** — inspect real AnnData files with bounded memory and export HTML/JSON structural reports.
+5. **Local H5AD / H5MU** — inspect native files with bounded memory, review scientific capabilities, record optional profile interpretations, and export offline HTML/JSON reports.
 
 The packaged native Windows preview intentionally does **not** bundle `cellxgene-census` because the SOMA dependency stack is not a normal native-Windows deployment target. CELLxGENE dataset discovery and H5AD acquisition do not require that dependency; the optional native Census analysis controls activate automatically in compatible Python environments.
 

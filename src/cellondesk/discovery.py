@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .catalog_cache import SearchBudget, SearchStats
+from .modality import PROFILE_LABELS
 from .models import DatasetRecord
 from .sources.cellxgene_discover import CellxGeneDiscoverClient
 from .sources.hubmap import HuBMAPClient
@@ -29,6 +30,7 @@ class SearchQuery:
     disease: str = ""
     cell_type: str = ""
     hubmap_status: str = "Published"
+    modalities: tuple[str, ...] = ()
 
 
 @dataclass
@@ -73,6 +75,7 @@ class DiscoveryService:
                     "query": query.keyword or None,
                     "organism": query.organism or None,
                     "limit": query.limit,
+                    "modalities": query.modalities,
                 }
                 if source == "hubmap":
                     outcome.records = client.search_datasets(
@@ -107,6 +110,10 @@ class DiscoveryService:
             outcome.elapsed_seconds = time.monotonic() - started
         if source != "cellxgene" and (query.disease or query.cell_type):
             outcome.notices.append("Disease and cell-type filters apply only to CELLxGENE.")
+        if query.modalities:
+            outcome.notices.append(
+                "Modality facet uses source assay hints; unclassified assays are excluded. Remote file contents remain unverified."
+            )
         if source == "hubmap":
             outcome.notices.append(
                 "Organ/assay aliases use exact HuBMAP values; unknown labels are exact searches."
@@ -139,7 +146,9 @@ class DiscoveryService:
         sources = tuple(dict.fromkeys(query.sources))
         if not sources or any(source not in SOURCES for source in sources):
             raise ValueError("Select at least one supported source.")
-        if not any(
+        if set(query.modalities) - PROFILE_LABELS.keys():
+            raise ValueError("Unknown scientific modality facet.")
+        if not query.modalities and not any(
             value.strip()
             for value in (
                 query.keyword,

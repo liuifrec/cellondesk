@@ -39,7 +39,7 @@ function drawComposition() {
   }
   const grouping = pooled(column.values), total = column.values.length;
   const maximum = Math.max(...grouping.groups.map(group => group.count), 1);
-  const body = tableHead($('composition-table'), ['Annotation', 'Cells', '% of inspected rows'], `${column.name} · denominator ${fmt(total)} inspected observations`);
+  const body = tableHead($('composition-table'), ['Annotation', 'Observations', '% of inspected rows'], `${column.name} · denominator ${fmt(total)} inspected observations`);
   for (const group of grouping.groups) {
     const row = element('div', undefined, 'bar-row');
     const track = element('div', undefined, 'bar-track'), fill = element('div', undefined, 'bar-fill');
@@ -69,8 +69,8 @@ function drawCrossTab(annotationGrouping) {
   });
   const percentMode = $('cross-mode').value === 'percent';
   const total = annotation.values.length;
-  $('cross-scope').textContent = `${sampleScope(obsSample)} · ${percentMode ? 'percent within each sample row; Total shows its cell count' : 'cell counts'} · missing annotations and sample values included.`;
-  const body = tableHead($('cross-table'), [sample.name, ...cols.map(group => groupLabel(group.value)), 'Total cells'], `${sample.name} × ${annotation.name}`);
+  $('cross-scope').textContent = `${sampleScope(obsSample)} · ${percentMode ? 'percent within each sample row; Total shows its observation count' : 'observation counts'} · missing annotations and sample values included.`;
+  const body = tableHead($('cross-table'), [sample.name, ...cols.map(group => groupLabel(group.value)), 'Total observations'], `${sample.name} × ${annotation.name}`);
   rows.forEach((group, row) => {
     const cells = counts[row].map(value => percentMode ? pct(value, group.count) : fmt(value));
     const tr = tableRow(body, [groupLabel(group.value), ...cells, fmt(group.count)]);
@@ -78,7 +78,7 @@ function drawCrossTab(annotationGrouping) {
       const cell = tr.children[col + 1];
       cell.dataset.count = value;
       cell.style.background = `rgba(8,127,120,${0.04 + 0.23 * value / group.count})`;
-      cell.title = `${fmt(value)} / ${fmt(group.count)} cells in this sample row`;
+      cell.title = `${fmt(value)} / ${fmt(group.count)} observations in this sample row`;
     });
   });
   const foot = element('tfoot');

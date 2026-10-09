@@ -13,11 +13,12 @@ from .assets import DownloadCancelled, download_asset, format_bytes
 from .catalog_cache import SearchStats
 from .census_report import write_census_report
 from .desktop_tasks import run_read_task, run_task
-from .h5ad_compat import H5ADInspection, inspect_h5ad
+from .h5ad_compat import H5ADInspection
 from .h5ad_report import validate_export_destination, write_h5ad_report
 from .manifest import write_hubmap_manifest
 from .models import DataAsset, DatasetRecord
 from .report import write_html_report
+from .scientific_formats import inspect_scientific
 from .sources.cellxgene_discover import CellxGeneDiscoverClient
 from .sources.census import CensusGenePreview, CensusQuery, preview_census_gene
 from .sources.hubmap import SPATIAL_DATASET_TYPES, HuBMAPClient
@@ -79,7 +80,7 @@ def main(*, smoke_test: bool = False) -> None:
             self.tabs.addTab(self._build_hubmap_tab(), "HuBMAP")
             self.tabs.addTab(self._build_cellxgene_tab(), "CELLxGENE")
             self.tabs.addTab(self._build_ucsc_tab(), "UCSC Cell Browser")
-            self.tabs.addTab(self._build_h5ad_tab(), "Local H5AD")
+            self.tabs.addTab(self._build_h5ad_tab(), "Local H5AD / H5MU")
             self.setCentralWidget(self.tabs)
             self.statusBar().showMessage("Ready")
 
@@ -371,13 +372,13 @@ def main(*, smoke_test: bool = False) -> None:
             controls = QHBoxLayout()
             self.h5ad_file_label = QLineEdit()
             self.h5ad_file_label.setReadOnly(True)
-            self.h5ad_file_label.setPlaceholderText("Choose or download a local .h5ad file")
+            self.h5ad_file_label.setPlaceholderText("Choose or download a native .h5ad / .h5mu file")
             self.h5ad_annotation = QLineEdit()
             self.h5ad_annotation.setPlaceholderText("Optional obs annotation, e.g. cell_type")
             self.h5ad_max_points = QSpinBox()
             self.h5ad_max_points.setRange(100, 50000)
             self.h5ad_max_points.setValue(5000)
-            choose_button = QPushButton("Choose H5AD")
+            choose_button = QPushButton("Choose H5AD / H5MU")
             inspect_button = QPushButton("Inspect")
             html_button = QPushButton("Export HTML")
             json_button = QPushButton("Export JSON")
@@ -394,6 +395,13 @@ def main(*, smoke_test: bool = False) -> None:
             ):
                 controls.addWidget(widget)
             layout.addLayout(controls)
+            profile_controls = QHBoxLayout()
+            profile_controls.addWidget(QLabel("Manual scientific profile(s), optional"))
+            self.h5ad_modality = QLineEdit()
+            self.h5ad_modality.setPlaceholderText("Comma-separated: rna, atac, spatial_transcriptomics, spatial_proteomics, multiomics, spatial_metabolomics")
+            self.h5ad_modality.setToolTip("Recorded interpretation only; never supplies missing data, units, transforms or cell correspondence.")
+            profile_controls.addWidget(self.h5ad_modality)
+            layout.addLayout(profile_controls)
 
             summary = QWidget()
             summary_form = QFormLayout(summary)
@@ -744,7 +752,7 @@ def main(*, smoke_test: bool = False) -> None:
                 QMessageBox.critical(self, "Download failed", str(exc))
                 return
             self.statusBar().showMessage(f"Downloaded {destination}")
-            if asset.is_h5ad or destination.suffix.casefold() == ".h5ad":
+            if asset.is_h5ad or destination.suffix.casefold() in {".h5ad", ".h5mu"}:
                 self._use_downloaded_h5ad(destination)
             else:
                 QMessageBox.information(self, "Download complete", f"Saved:\n{destination}")
@@ -761,7 +769,7 @@ def main(*, smoke_test: bool = False) -> None:
             self.tabs.setCurrentIndex(4)
             answer = QMessageBox.question(
                 self,
-                "H5AD downloaded",
+                "Scientific file downloaded",
                 f"Saved {path.name}. Inspect it now with bounded memory?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
@@ -799,7 +807,7 @@ def main(*, smoke_test: bool = False) -> None:
 
         def choose_h5ad(self) -> None:
             filename, _ = QFileDialog.getOpenFileName(
-                self, "Choose an H5AD file", "", "AnnData files (*.h5ad);;All files (*)"
+                self, "Choose a scientific file", "", "H5AD / MuData files (*.h5ad *.h5mu);;All files (*)"
             )
             if not filename:
                 return
@@ -814,18 +822,19 @@ def main(*, smoke_test: bool = False) -> None:
 
         def inspect_h5ad_file(self) -> None:
             if self.h5ad_path is None:
-                QMessageBox.information(self, "No file selected", "Choose or download an H5AD first.")
+                QMessageBox.information(self, "No file selected", "Choose or download an H5AD / H5MU file first.")
                 return
             source = self.h5ad_path
             annotation = self.h5ad_annotation.text().strip() or None
             max_points = self.h5ad_max_points.value()
+            profiles = [value.strip() for value in self.h5ad_modality.text().split(",") if value.strip()]
             try:
                 self.h5ad_inspection = run_read_task(
-                    self, "Inspecting local H5AD",
-                    lambda: inspect_h5ad(source, annotation=annotation, max_points=max_points),
+                    self, "Inspecting native scientific file",
+                    lambda: inspect_scientific(source, annotation=annotation, max_points=max_points, modality_override=profiles),
                 )
             except (OSError, RuntimeError, ValueError) as exc:
-                QMessageBox.critical(self, "H5AD inspection failed", str(exc))
+                QMessageBox.critical(self, "Scientific inspection failed", str(exc))
                 return
 
             result = self.h5ad_inspection
@@ -847,7 +856,7 @@ def main(*, smoke_test: bool = False) -> None:
 
         def _require_h5ad_inspection(self) -> H5ADInspection | None:
             if self.h5ad_inspection is None:
-                QMessageBox.information(self, "Nothing to export", "Inspect an H5AD file first.")
+                QMessageBox.information(self, "Nothing to export", "Inspect an H5AD / H5MU file first.")
             return self.h5ad_inspection
 
         def export_h5ad_html(self) -> None:
@@ -856,7 +865,7 @@ def main(*, smoke_test: bool = False) -> None:
                 return
             filename, _ = QFileDialog.getSaveFileName(
                 self,
-                "Export H5AD HTML report",
+                "Export scientific HTML report",
                 f"{Path(result.file_name).stem}-summary.html",
                 "HTML files (*.html)",
             )
@@ -872,7 +881,7 @@ def main(*, smoke_test: bool = False) -> None:
                 return
             filename, _ = QFileDialog.getSaveFileName(
                 self,
-                "Export H5AD JSON inspection",
+                "Export scientific JSON inspection",
                 f"{Path(result.file_name).stem}-summary.json",
                 "JSON files (*.json)",
             )
@@ -892,7 +901,7 @@ def main(*, smoke_test: bool = False) -> None:
         # Exercise data-file lookup inside the frozen and installed desktop bundles.
         assets = files("cellondesk").joinpath("report_assets", "h5ad")
         for name in ("shell.html", "dashboard.css", "core.js", "embeddings.js",
-                     "composition.js", "qc.js", "dashboard.js"):
+                     "composition.js", "qc.js", "modalities.js", "dashboard.js"):
             assert assets.joinpath(name).read_text(encoding="utf-8")
         assert window.tabs.count() == 5
         # Exercise the worker/event-loop boundary in the actual packaged app.

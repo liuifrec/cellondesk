@@ -43,7 +43,9 @@ def search(
     organ: Annotated[str | None, typer.Option(help="Exact HuBMAP organ code")] = None,
     status: Annotated[str | None, typer.Option(help="Dataset status")] = "Published",
     limit: Annotated[int, typer.Option(min=1, max=1000)] = 50,
-    json_output: Annotated[Path | None, typer.Option("--json", help="Write normalized JSON")] = None,
+    json_output: Annotated[
+        Path | None, typer.Option("--json", help="Write normalized JSON")
+    ] = None,
     manifest: Annotated[Path | None, typer.Option(help="Write HuBMAP CLT manifest")] = None,
     html_report: Annotated[
         Path | None,
@@ -82,13 +84,24 @@ def search(
 
 @app.command("inspect-h5ad")
 def inspect_h5ad_command(
-    path: Annotated[Path, typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True)],
+    path: Annotated[
+        Path, typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True)
+    ],
     html_report: Annotated[Path | None, typer.Option("--html")] = None,
     json_output: Annotated[Path | None, typer.Option("--json")] = None,
     annotation: Annotated[str | None, typer.Option()] = None,
     max_points: Annotated[int, typer.Option(min=1, max=50000)] = 5000,
+    modality: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--modality",
+            help="Explicit profile interpretation; repeat for hybrids (rna, atac, spatial_transcriptomics, spatial_proteomics, multiomics, spatial_metabolomics)",
+        ),
+    ] = None,
 ) -> None:
-    inspection = inspect_h5ad_file(path, max_points=max_points, annotation=annotation)
+    inspection = inspect_h5ad_file(
+        path, max_points=max_points, annotation=annotation, modality_override=modality
+    )
     for destination in (json_output, html_report):
         if destination is not None:
             validate_export_destination(inspection, destination)
@@ -103,9 +116,38 @@ def inspect_h5ad_command(
         typer.echo(f"Wrote {html_report}")
 
 
+@app.command("inspect-scientific")
+def inspect_scientific_command(
+    path: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    html_report: Annotated[Path | None, typer.Option("--html")] = None,
+    json_output: Annotated[Path | None, typer.Option("--json")] = None,
+    modality: Annotated[
+        list[str] | None,
+        typer.Option("--modality", help="Manual scientific profile; repeat for multiple profiles"),
+    ] = None,
+    max_points: Annotated[int, typer.Option(min=1, max=50000)] = 5000,
+) -> None:
+    """Inspect native H5AD/H5MU without flattening modalities or modifying source files."""
+    from .scientific_formats import inspect_scientific
+
+    result = inspect_scientific(path, modality_override=modality, max_points=max_points)
+    for destination in (html_report, json_output):
+        if destination is not None:
+            validate_export_destination(result, destination)
+    if html_report:
+        write_h5ad_report(result, html_report, title="CellOnDesk scientific dashboard")
+    if json_output:
+        json_output.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    typer.echo(
+        f"{result.storage_format}: {result.n_obs:,} global observations; native scientific modules preserved"
+    )
+
+
 @app.command("preview-gene")
 def preview_gene_command(
-    path: Annotated[Path, typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True)],
+    path: Annotated[
+        Path, typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True)
+    ],
     gene: Annotated[str, typer.Argument(help="Gene identifier or symbol")],
     html_report: Annotated[Path, typer.Option("--html")] = Path("gene-expression.html"),
     json_output: Annotated[Path | None, typer.Option("--json")] = None,
@@ -153,8 +195,7 @@ def census_values_command(
         limit=limit,
     )
     typer.echo(
-        f"{result.field} values for {result.organism} "
-        f"(Census {result.resolved_census_version})"
+        f"{result.field} values for {result.organism} (Census {result.resolved_census_version})"
     )
     for item in result.values:
         ontology = item.ontology_term_id or ""

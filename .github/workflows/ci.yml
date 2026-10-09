@@ -66,7 +66,7 @@ jobs:
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev,browser]"
       - run: python -m playwright install --with-deps chromium
-      - run: pytest tests/test_h5ad_browser.py -v
+      - run: pytest tests/test_h5ad_browser.py tests/test_modality_browser.py -v
         env:
           CELLONDESK_BROWSER_TESTS: "1"
           CELLONDESK_BROWSER_ARTIFACTS: build/h5ad-dashboard
@@ -86,7 +86,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev,gui]"
-      - run: pytest tests/test_discovery.py tests/test_discovery_gui.py tests/test_desktop_tasks.py -v
+      - run: pytest tests/test_discovery.py tests/test_modality_discovery.py tests/test_discovery_gui.py tests/test_desktop_tasks.py -v
         env:
           QT_QPA_PLATFORM: offscreen
           CELLONDESK_GUI_ARTIFACTS: build/discovery

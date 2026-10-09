@@ -100,7 +100,7 @@ def test_offline_overview_coloring_composition_qc_and_screenshots(browser_page, 
     screenshot(page, tmp_path, "embedding-categorical")
     page.locator("#embedding-select").select_option(index=1)
     assert "12 plotted / 12 total" in page.locator("#point-count").inner_text()
-    page.get_by_role("tab", name="Cell composition", exact=True).click()
+    page.get_by_role("tab", name="Observation composition", exact=True).click()
     counts = page.locator("#composition-table tbody tr").evaluate_all(
         "(rows) => Object.fromEntries(rows.map(r => [r.cells[0].textContent, Number(r.cells[1].textContent)]))"
     )
@@ -166,7 +166,7 @@ def test_sampled_report_uses_matching_rows_and_denominators(browser_page, tmp_pa
       return [[163,568],[937,310],[937,52]].map(([x,y]) => Array.from(c.getImageData(x,y,1,1).data));
     }""")
     assert len({tuple(p) for p in pixels}) == 3
-    page.get_by_role("tab", name="Cell composition", exact=True).click()
+    page.get_by_role("tab", name="Observation composition", exact=True).click()
     assert "Sampled: 6 / 12" in page.locator("#composition-scope").inner_text()
     assert page.locator("#cross-table tfoot td").last.inner_text() == "6"
     page.get_by_role("tab", name="QC & metadata", exact=True).click()
@@ -197,7 +197,7 @@ def test_empty_and_older_inspections_are_honest(browser_page, tmp_path):
     page.goto(report(tmp_path, name="empty", rows=0).as_uri())
     page.get_by_role("tab", name="Embeddings", exact=True).click()
     assert "0 plotted / 0 total" in page.locator("#point-count").inner_text()
-    page.get_by_role("tab", name="Cell composition", exact=True).click()
+    page.get_by_role("tab", name="Observation composition", exact=True).click()
     assert "No categorical observation values" in page.locator("#composition-bars").inner_text()
     page.get_by_role("tab", name="QC & metadata", exact=True).click()
     assert "No finite values" in page.locator("#qc-chart").inner_text()
@@ -224,7 +224,7 @@ def test_empty_and_older_inspections_are_honest(browser_page, tmp_path):
     page.get_by_role("tab", name="Embeddings", exact=True).click()
     assert "candidate count not recorded" in page.locator("#point-count").inner_text()
     assert "T · 1" in page.locator("#legend").inner_text()
-    page.get_by_role("tab", name="Cell composition", exact=True).click()
+    page.get_by_role("tab", name="Observation composition", exact=True).click()
     assert "not recorded" in page.locator("#composition-scope").inner_text()
     screenshot(page, tmp_path, "old-inspection")
 
@@ -245,7 +245,7 @@ def test_high_cardinality_and_hostile_labels_keep_totals_and_do_not_execute(brow
     page.goto(target.as_uri())
     assert page.title() == hostile
     assert page.evaluate("window.injected") is None
-    page.get_by_role("tab", name="Cell composition", exact=True).click()
+    page.get_by_role("tab", name="Observation composition", exact=True).click()
     labels = page.locator("#composition-table tbody th").all_text_contents()
     assert "∅ Missing metadata (literal category)" in labels
     assert "∅ Missing metadata" in labels

@@ -15,8 +15,9 @@ from cellondesk.catalog_cache import (
     SearchStopped,
     default_cache_dir,
 )
+from cellondesk.modality import assay_profiles
 from cellondesk.models import DataAsset, DatasetRecord
-from cellondesk.search_metadata import organism_matches, reported_count
+from cellondesk.search_metadata import annotate_modalities, organism_matches, reported_count
 
 ROOT_URL = "https://cells.ucsc.edu"
 CATALOG_URL = f"{ROOT_URL}/dataset.json"
@@ -91,6 +92,7 @@ class UCSCCellBrowserClient:
         assay: str | None = None,
         limit: int = 100,
         refresh: bool = False,
+        modalities: tuple[str, ...] = (),
     ) -> list[DatasetRecord]:
         """Traverse collections before filtering leaves, including unmatched parents.
 
@@ -160,6 +162,10 @@ class UCSCCellBrowserClient:
                     )
                     continue
                 stats.scanned += 1
+                if modalities and not set(modalities).intersection(
+                    assay_profiles(_field(metadata, "assays", "assay"))
+                ):
+                    continue
                 if not _matches(metadata, query=query, organ=organ, organism=organism, assay=assay):
                     continue
                 stats.matched += 1
@@ -357,7 +363,7 @@ def _normalize(item: Mapping[str, Any], path: str) -> DatasetRecord:
         title = f"{title} [{organism}]"
     encoded = quote(path, safe="/")
     portal = f"{ROOT_URL}/?ds={encoded}"
-    return DatasetRecord(
+    record = DatasetRecord(
         source="UCSC Cell Browser",
         dataset_id=path,
         title=title,
@@ -374,6 +380,7 @@ def _normalize(item: Mapping[str, Any], path: str) -> DatasetRecord:
         portal_url=portal,
         raw=dict(item),
     )
+    return annotate_modalities(record)
 
 
 __all__ = ["UCSCCellBrowserClient"]

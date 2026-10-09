@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from .discovery import SOURCES, DiscoveryService, SearchQuery, SourceOutcome, access_summary
+from .modality import PROFILE_LABELS
 from .models import DatasetRecord
 
 COLUMNS = (
@@ -47,6 +48,8 @@ COLUMNS = (
     "Publication",
     "Access / files",
     "Acquisition",
+    "Assay-derived modalities (unverified)",
+    "Local inspection support (format only)",
 )
 
 
@@ -65,6 +68,9 @@ def _values(record: DatasetRecord) -> tuple:
         record.status,
         access_summary(record),
         "; ".join(record.acquisition_methods) or "Not yet checked",
+        "; ".join(PROFILE_LABELS.get(key, key) for key in record.reported_modalities)
+        or "Unclassified; file not checked",
+        "; ".join(record.local_inspection_support) or "File format not yet checked",
     )
 
 
@@ -163,7 +169,7 @@ class DiscoveryWidget(QWidget):
         layout.addWidget(heading)
         hint = QLabel(
             "Search repository metadata together. Counts are source-reported observations, "
-            "not donors or biological replicates. Advanced source tabs and Local H5AD remain available."
+            "not donors or biological replicates. Advanced source tabs and local inspection remain available."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -190,6 +196,27 @@ class DiscoveryWidget(QWidget):
             group.addRow(label, edit)
             form.addLayout(group)
         layout.addLayout(form)
+        modality_form = QHBoxLayout()
+        modality_form.addWidget(QLabel("Scientific modality"))
+        self.modalities = {}
+        for key, label in (
+            ("rna", "RNA"),
+            ("atac", "ATAC"),
+            ("spatial_transcriptomics", "Spatial RNA"),
+            ("spatial_proteomics", "Spatial protein"),
+            ("multiomics", "Multiomics"),
+            ("spatial_metabolomics", "Spatial metabolites"),
+        ):
+            box = QCheckBox(label)
+            box.setToolTip(
+                PROFILE_LABELS[key]
+                + ". Matches assay-derived repository hints, not verified file contents. "
+                "Multiple choices mean any selected modality; unclassified records are excluded."
+            )
+            self.modalities[key] = box
+            modality_form.addWidget(box)
+        modality_form.addStretch()
+        layout.addLayout(modality_form)
         controls = QHBoxLayout()
         self.sources = {}
         for key, name in SOURCES.items():
@@ -285,7 +312,7 @@ class DiscoveryWidget(QWidget):
         self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for column, width in enumerate((150, 290, 125, 130, 150, 155, 105, 300, 190)):
+        for column, width in enumerate((150, 290, 125, 130, 150, 155, 105, 300, 190, 280, 350)):
             self.table.setColumnWidth(column, width)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
@@ -352,6 +379,9 @@ class DiscoveryWidget(QWidget):
             f"{record.title}\n{record.source} · {record.dataset_id}\n"
             f"Publication: {record.status or 'Not reported'}\n{access_summary(record)}\n"
             f"Acquisition: {'; '.join(record.acquisition_methods) or 'Not yet checked'}\n"
+            f"Assay-derived modality hints (unverified): {'; '.join(record.reported_modalities) or 'Unclassified'}\n"
+            f"File-verified modalities: {'; '.join(record.file_verified_modalities) or 'File not inspected'}\n"
+            f"Local inspection support: {'; '.join(record.local_inspection_support) or 'File format not yet checked'}\n"
             f"Count basis: {record.cell_count_basis or 'No cell count reported'}\n"
             f"Metadata fetched: {timestamp}\n\nOriginal metadata and provenance:\n"
         )
@@ -406,6 +436,7 @@ class DiscoveryWidget(QWidget):
         query = SearchQuery(
             **filters,
             sources=sources,
+            modalities=tuple(key for key, box in self.modalities.items() if box.isChecked()),
             limit=self.limit.value(),
             refresh=refresh,
             disease=self.disease.text().strip() if advanced else "",
@@ -417,6 +448,8 @@ class DiscoveryWidget(QWidget):
             else "Published",
         )
         summary = [f"{name}: {value}" for name, value in filters.items() if value]
+        if query.modalities:
+            summary.append("Assay-derived modalities: " + ", ".join(query.modalities))
         if query.disease:
             summary.append(f"CELLxGENE disease: {query.disease}")
         if query.cell_type:

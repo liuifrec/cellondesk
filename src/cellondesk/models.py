@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .modality import ModalityEvidence
+
 
 class DataAsset(BaseModel):
     """A directly downloadable file exposed by a public data source."""
@@ -41,6 +43,10 @@ class DatasetRecord(BaseModel):
     asset_status: str = "not_checked"
     acquisition_methods: list[str] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
+    reported_modalities: list[str] = Field(default_factory=list)
+    modality_evidence: list[ModalityEvidence] = Field(default_factory=list)
+    file_verified_modalities: list[str] = Field(default_factory=list)
+    local_inspection_support: list[str] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict, repr=False)
 
 

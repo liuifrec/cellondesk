@@ -11,6 +11,7 @@ from typing import Any
 
 from ._version import __version__
 from .inspection import H5ADInspection
+from .modality_report import scientific_markup
 
 
 def _escape(value: object) -> str:
@@ -77,9 +78,11 @@ def _kv(rows: list[tuple[str, object]]) -> str:
 def render_h5ad_report(
     inspection: H5ADInspection,
     *,
-    title: str = "CellOnDesk H5AD Summary",
+    title: str | None = None,
 ) -> str:
     """Render offline HTML without reading or modifying the source H5AD."""
+    if title is None:
+        title = f"CellOnDesk {inspection.storage_format} Summary"
     resources = files("cellondesk").joinpath("report_assets", "h5ad")
     template = Template(resources.joinpath("shell.html").read_text(encoding="utf-8"))
     # Escape all markup delimiters, including script endings and HTML comments.
@@ -106,7 +109,11 @@ def render_h5ad_report(
         if sample
         else "Metadata chart coverage was not recorded by this older inspection."
     )
-    warnings = "".join(f"<li>{_escape(note)}</li>" for note in inspection.warnings)
+    notes = list(inspection.warnings)
+    if inspection.scientific:
+        notes.extend(inspection.scientific.warnings)
+        notes.extend(c.reason for c in inspection.scientific.capabilities if c.state == "invalid")
+    warnings = "".join(f"<li>{_escape(note)}</li>" for note in dict.fromkeys(notes))
     warnings = warnings or "<li>No issues detected within the bounded inspection scope.</li>"
     matrix_rows = _kv(
         [
@@ -183,10 +190,13 @@ def render_h5ad_report(
                 "embeddings.js",
                 "composition.js",
                 "qc.js",
+                "modalities.js",
                 "dashboard.js",
             )
         ),
         payload=payload,
+        storage_format=_escape(inspection.storage_format),
+        scientific_markup=scientific_markup(inspection.scientific),
         n_obs=f"{inspection.n_obs:,}",
         n_vars=f"{inspection.n_vars:,}",
         file_size=_format_bytes(inspection.file_size_bytes),
@@ -215,7 +225,7 @@ def write_h5ad_report(
     inspection: H5ADInspection,
     destination: str | Path,
     *,
-    title: str = "CellOnDesk H5AD Summary",
+    title: str | None = None,
 ) -> Path:
     destination = validate_export_destination(inspection, destination)
     destination.write_text(render_h5ad_report(inspection, title=title), encoding="utf-8")
@@ -230,6 +240,6 @@ def validate_export_destination(inspection: H5ADInspection, destination: str | P
         destination.exists() and source.exists() and destination.samefile(source)
     ):
         raise ValueError("Export destination must not overwrite the source H5AD")
-    if destination.suffix.lower() == ".h5ad":
-        raise ValueError("Export destination must not have an .h5ad extension")
+    if destination.suffix.lower() in {".h5ad", ".h5mu", ".zarr", ".imzml", ".ibd", ".tif", ".tiff"}:
+        raise ValueError("Export destination must not have an .h5ad or other scientific source extension")
     return destination

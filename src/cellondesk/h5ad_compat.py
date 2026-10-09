@@ -122,6 +122,7 @@ def inspect_h5ad(
     max_column_values: int = 20000,
     max_obs_columns: int = 50,
     max_var_columns: int = 30,
+    modality_override: list[str] | tuple[str, ...] | None = None,
 ) -> H5ADInspection:
     """Inspect modern and legacy AnnData H5AD layouts with bounded reads."""
     h5py, np = _core._require_data_dependencies()
@@ -218,6 +219,16 @@ def inspect_h5ad(
             metadata=embedding_metadata,
         )
         warnings.extend(embedding_warnings)
+        from .modality_h5ad import inspect_group
+
+        scientific = inspect_group(
+            handle,
+            n_obs=n_obs,
+            n_vars=n_vars,
+            numeric_obs=[column.name for column in obs_columns if column.numeric is not None],
+            np=np,
+            overrides=modality_override,
+        )
         if len(obs_indices) < n_obs:
             warnings.append(
                 f"Observation summaries/composition use {len(obs_indices):,} of {n_obs:,} rows; "
@@ -271,6 +282,7 @@ def inspect_h5ad(
             warnings=list(dict.fromkeys(warnings)),
             obs_sample=obs_sample,
             embedding_metadata=embedding_metadata,
+            scientific=scientific,
             provenance=InspectionProvenance(
                 generator_version=__version__,
                 inspected_at=datetime.now(timezone.utc).isoformat(),

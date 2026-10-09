@@ -205,3 +205,31 @@ def test_validation_returns_controls_to_ready_state(widget, app):
     assert widget.search_button.isEnabled()
     assert "filter" in widget.count_label.text()
     assert widget.selected_record() is None
+
+
+def test_modality_facets_and_details_remain_distinct_from_assay_and_verified_files(widget, app, tmp_path):
+    fixture = CatalogFixture()
+    widget.service = DiscoveryService(factories=fixture.factories(tmp_path))
+    widget.sources["hubmap"].setChecked(False)
+    widget.sources["ucsc"].setChecked(False)
+    widget.modalities["rna"].setChecked(True)
+    widget.modalities["atac"].setChecked(True)
+    widget.search_button.click()
+    _finish(app, widget)
+    assert widget.worker.query.modalities == ("rna", "atac")
+    assert widget.worker.query.assay == ""
+    assert widget.model.rowCount() == 1
+    widget.table.sortByColumn(9, Qt.SortOrder.DescendingOrder)
+    widget.table.selectRow(0)
+    assert widget.selected_record().dataset_id == "cxg-kidney"
+    details = widget.details.toPlainText()
+    assert "Assay-derived modality hints (unverified): rna" in details
+    assert "File-verified modalities: File not inspected" in details
+    assert "Bounded H5AD" in details
+    requests = len(fixture.requests)
+    widget.local_text.setText("transcriptomics")
+    assert widget.proxy.rowCount() == 1
+    assert widget.selected_record().dataset_id == "cxg-kidney"
+    widget.local_text.setText("chromatin")
+    assert widget.selected_record() is None and not widget.details.toPlainText()
+    assert len(fixture.requests) == requests
