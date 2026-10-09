@@ -8,7 +8,16 @@ import httpx
 from typing_extensions import Self
 
 from cellondesk.assets import probe_asset
+from cellondesk.catalog_cache import (
+    CatalogCache,
+    SearchBudget,
+    SearchStats,
+    SearchStopped,
+    default_cache_dir,
+)
+from cellondesk.modality import assay_profiles
 from cellondesk.models import DataAsset, DatasetRecord
+from cellondesk.search_metadata import annotate_modalities, organism_matches, reported_count
 
 ROOT_URL = "https://cells.ucsc.edu"
 CATALOG_URL = f"{ROOT_URL}/dataset.json"
@@ -34,7 +43,17 @@ class UCSCCellBrowserClient:
         self,
         timeout: float = 30.0,
         transport: httpx.BaseTransport | None = None,
+        cache: CatalogCache | None = None,
+        budget: SearchBudget | None = None,
+        max_nodes: int = 2000,
     ) -> None:
+        self.cache = cache or CatalogCache(None if transport else default_cache_dir())
+        self.budget = budget
+        self.timeout = timeout
+        self.max_nodes = max_nodes
+        self.last_search = SearchStats()
+        self._budget = budget or SearchBudget(timeout)
+        self._refresh = False
         self._client = httpx.Client(
             headers={"Accept": "application/json"},
             timeout=timeout,
@@ -53,9 +72,13 @@ class UCSCCellBrowserClient:
 
     def _json(self, path: str = "") -> Mapping[str, Any]:
         suffix = f"/{path.strip('/')}" if path.strip("/") else ""
-        response = self._client.get(f"{ROOT_URL}{suffix}/dataset.json")
-        response.raise_for_status()
-        payload = response.json()
+        payload = self.cache.get(
+            self._client,
+            f"{ROOT_URL}{suffix}/dataset.json",
+            budget=self._budget,
+            stats=self.last_search,
+            refresh=self._refresh,
+        )
         if not isinstance(payload, Mapping):
             raise TypeError("UCSC Cell Browser returned an unexpected catalog payload")
         return payload
@@ -66,61 +89,108 @@ class UCSCCellBrowserClient:
         query: str | None = None,
         organ: str | None = None,
         organism: str | None = None,
+        assay: str | None = None,
         limit: int = 100,
+        refresh: bool = False,
+        modalities: tuple[str, ...] = (),
     ) -> list[DatasetRecord]:
-        """Search public Cell Browser collections and expand matching collections."""
+        """Traverse collections before filtering leaves, including unmatched parents.
+
+        Known leaves use their published catalog summary. Unknown/legacy nodes
+        are hydrated to distinguish a dataset from a nested collection. Parent
+        biological metadata and observation counts never become child metadata.
+        """
+        stats = self.last_search = SearchStats()
+        self._budget = self.budget or SearchBudget(self.timeout)
+        self._refresh = refresh
         bounded_limit = max(1, min(limit, 500))
         root = self._json()
-        top = root.get("datasets", [])
-        if not isinstance(top, list):
-            return []
-
-        candidates = [
-            item
-            for item in top
-            if isinstance(item, Mapping)
-            and _matches(item, query=query, organ=organ, organism=organism)
-        ]
-        records: list[DatasetRecord] = []
-        seen: set[str] = set()
-        for item in candidates:
-            name = str(item.get("name") or "").strip("/")
-            if not name:
-                continue
-            try:
-                payload = self._json(name)
-            except (httpx.HTTPError, TypeError):
-                payload = {}
-            children = payload.get("datasets", []) if isinstance(payload, Mapping) else []
-            if isinstance(children, list) and children:
-                for child in children:
-                    if not isinstance(child, Mapping):
+        if not isinstance(root.get("datasets"), list):
+            raise TypeError("UCSC catalog has no dataset list")
+        pending = [(item, "", (), 0, CATALOG_URL) for item in reversed(root["datasets"])]
+        records = []
+        seen = set()
+        try:
+            while pending:
+                self._budget.remaining()
+                if len(seen) >= self.max_nodes:
+                    raise SearchStopped(f"UCSC catalog node limit reached ({self.max_nodes}).")
+                item, parent, lineage, depth, listing_url = pending.pop()
+                if not isinstance(item, Mapping) or not item.get("name"):
+                    stats.warn("UCSC catalog entry without a source identifier omitted.")
+                    continue
+                name = str(item["name"]).strip("/")
+                path = _dataset_path(parent, name) if parent else name
+                if path in seen:
+                    if path in (*lineage, parent):
+                        stats.warn(f"Cyclic UCSC catalog reference omitted: {path}.")
+                    continue
+                if (
+                    depth > 12
+                    or any(part in {".", "..", ""} for part in path.split("/"))
+                    or any(char in path for char in ("\\", "?", "#", ":"))
+                ):
+                    stats.warn("Invalid or excessively nested UCSC catalog path omitted.")
+                    continue
+                seen.add(path)
+                metadata = dict(item)
+                is_collection = bool(
+                    item.get("isCollection")
+                    or "datasets" in item
+                    or item.get("datasetCount")
+                    or item.get("collectionCount")
+                )
+                url = f"{ROOT_URL}/{quote(path, safe='/')}/dataset.json"
+                # sampleCount identifies leaf summaries in the UCSC catalog schema.
+                if is_collection or "sampleCount" not in item:
+                    try:
+                        metadata.update(self._json(quote(path, safe="/")))
+                        listing_url = url
+                    except (httpx.HTTPError, ValueError, TypeError) as exc:
+                        stats.warn(f"Could not read {path}: {exc}")
+                if "datasets" in metadata or is_collection:
+                    children = metadata.get("datasets")
+                    if not isinstance(children, list):
+                        stats.warn(f"Collection {path} has no readable child list.")
                         continue
-                    merged = dict(item)
-                    merged.update(child)
-                    child_name = str(child.get("name") or "").strip("/")
-                    path = _dataset_path(name, child_name)
-                    if not _matches(merged, query=query, organ=organ, organism=organism):
-                        continue
-                    record = _normalize(merged, path)
-                    if record.dataset_id not in seen:
-                        records.append(record)
-                        seen.add(record.dataset_id)
-                    if len(records) >= bounded_limit:
-                        return records
-            else:
-                merged = dict(item)
-                merged.update(payload)
-                record = _normalize(merged, name)
-                if record.dataset_id not in seen:
+                    available = max(0, self.max_nodes - len(pending) - len(seen))
+                    if len(children) > available:
+                        stats.warn("UCSC pending catalog node limit reached.")
+                    pending.extend(
+                        (child, path, (*lineage, path), depth + 1, listing_url)
+                        for child in reversed(children[:available])
+                    )
+                    continue
+                stats.scanned += 1
+                if modalities and not set(modalities).intersection(
+                    assay_profiles(_field(metadata, "assays", "assay"))
+                ):
+                    continue
+                if not _matches(metadata, query=query, organ=organ, organism=organism, assay=assay):
+                    continue
+                stats.matched += 1
+                if len(records) < bounded_limit:
+                    record = _normalize(metadata, path)
+                    record.provenance = {
+                        "metadata_url": listing_url,
+                        "dataset_metadata_url": url,
+                        "fetched_at": stats.metadata_timestamps.get(listing_url),
+                        "lineage": list(lineage),
+                        "scope": "published catalog leaf metadata",
+                    }
                     records.append(record)
-                    seen.add(record.dataset_id)
-                if len(records) >= bounded_limit:
-                    return records
+        except SearchStopped as exc:
+            stats.warn(str(exc))
+        stats.returned = len(records)
+        stats.truncated = stats.matched > stats.returned
+        for record in records:
+            record.provenance["coverage"] = stats.scope()
         return records
 
     def resolve_assets(self, record: DatasetRecord) -> list[DataAsset]:
         """Resolve public matrix/metadata files from Cell Browser dataset metadata."""
+        self._budget = self.budget or SearchBudget(self.timeout)
+        self._refresh = False
         # Child catalogue entries may omit the file inventory; hydrate the leaf.
         metadata = dict(record.raw)
         try:
@@ -188,9 +258,11 @@ def _values(value: Any) -> list[str]:
 
 def _field(item: Mapping[str, Any], *names: str) -> str | None:
     for name in names:
-        if name not in item:
-            continue
-        values = [text.strip() for text in _values(item.get(name)) if text.strip()]
+        facets = item.get("facets")
+        value = item.get(name)
+        if value is None and isinstance(facets, Mapping):
+            value = facets.get(name)
+        values = [text.strip() for text in _values(value) if text.strip()]
         if values:
             return ", ".join(dict.fromkeys(values))
     return None
@@ -210,12 +282,9 @@ def _haystack(item: Mapping[str, Any]) -> str:
         "projects",
         "sources",
         "assays",
+        "facets",
     )
-    return " ".join(
-        text.casefold()
-        for key in interesting
-        for text in _values(item.get(key))
-    )
+    return " ".join(text.casefold() for key in interesting for text in _values(item.get(key)))
 
 
 def _matches(
@@ -224,18 +293,33 @@ def _matches(
     query: str | None,
     organ: str | None,
     organism: str | None,
+    assay: str | None = None,
 ) -> bool:
-    haystack = _haystack(item)
-    if query and query.strip().casefold() not in haystack:
+    if query and query.strip().casefold() not in _haystack(item):
         return False
-    if organ and organ.strip().casefold() not in haystack:
+    if (
+        organ
+        and organ.strip().casefold()
+        not in (_field(item, "body_parts", "bodyParts", "organ", "tissue") or "").casefold()
+    ):
         return False
-    return not (organism and organism.strip().casefold() not in haystack)
+    if assay and assay.strip().casefold() not in (_field(item, "assays", "assay") or "").casefold():
+        return False
+    return organism_matches(_field(item, "organisms", "organism"), organism)
 
 
 def _candidate_files(item: Mapping[str, Any]) -> list[str]:
     values: list[str] = []
-    for key in ("hasFiles", "files", "downloads", "exprMatrix", "matrixFile", "meta", "metaFile", "coords"):
+    for key in (
+        "hasFiles",
+        "files",
+        "downloads",
+        "exprMatrix",
+        "matrixFile",
+        "meta",
+        "metaFile",
+        "coords",
+    ):
         values.extend(_values(item.get(key)))
     return [value.strip() for value in values if _looks_downloadable(value.strip())]
 
@@ -279,17 +363,24 @@ def _normalize(item: Mapping[str, Any], path: str) -> DatasetRecord:
         title = f"{title} [{organism}]"
     encoded = quote(path, safe="/")
     portal = f"{ROOT_URL}/?ds={encoded}"
-    return DatasetRecord(
+    record = DatasetRecord(
         source="UCSC Cell Browser",
         dataset_id=path,
         title=title,
         dataset_type=assay,
-        status="Public",
+        organism=organism,
+        reported_cell_count=reported_count(item.get("sampleCount")),
+        cell_count_basis="UCSC sampleCount (matrix observations; may include spots)"
+        if reported_count(item.get("sampleCount")) is not None
+        else None,
+        asset_status="advertised" if _candidate_files(item) else "not_checked",
+        acquisition_methods=["Direct download (advertised)"] if _candidate_files(item) else [],
         organ=organ,
         access_level="public",
         portal_url=portal,
         raw=dict(item),
     )
+    return annotate_modalities(record)
 
 
 __all__ = ["UCSCCellBrowserClient"]
@@ -316,7 +407,9 @@ def _asset_url(dataset_path: str, filename: str) -> str | None:
     if any(part == ".." for part in path.split("/")):
         return None
     if (
-        not parts.scheme and not parts.netloc and not path.startswith("/")
+        not parts.scheme
+        and not parts.netloc
+        and not path.startswith("/")
         and path.startswith(dataset_path.strip("/") + "/")
     ):
         filename = "/" + filename

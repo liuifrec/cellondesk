@@ -10,13 +10,15 @@ import httpx
 
 from ._version import __version__
 from .assets import DownloadCancelled, download_asset, format_bytes
+from .catalog_cache import SearchStats
 from .census_report import write_census_report
 from .desktop_tasks import run_read_task, run_task
-from .h5ad_compat import H5ADInspection, inspect_h5ad
-from .h5ad_report import write_h5ad_report
+from .h5ad_compat import H5ADInspection
+from .h5ad_report import validate_export_destination, write_h5ad_report
 from .manifest import write_hubmap_manifest
 from .models import DataAsset, DatasetRecord
 from .report import write_html_report
+from .scientific_formats import inspect_scientific
 from .sources.cellxgene_discover import CellxGeneDiscoverClient
 from .sources.census import CensusGenePreview, CensusQuery, preview_census_gene
 from .sources.hubmap import SPATIAL_DATASET_TYPES, HuBMAPClient
@@ -53,6 +55,8 @@ def main(*, smoke_test: bool = False) -> None:
     except ImportError as exc:
         raise SystemExit('Install GUI dependencies with: pip install "cellondesk[gui]"') from exc
 
+    from .discovery_gui import DiscoveryWidget
+
     class Window(QMainWindow):
         def __init__(self) -> None:
             super().__init__()
@@ -66,12 +70,57 @@ def main(*, smoke_test: bool = False) -> None:
             self.h5ad_path: Path | None = None
 
             self.tabs = QTabWidget()
+            self.discovery = DiscoveryWidget(self)
+            self.discovery.resolve_requested.connect(self.resolve_discovery_files)
+            self.discovery.manifest_requested.connect(self.export_discovery_manifest)
+            self.discovery.portal_requested.connect(
+                lambda record: webbrowser.open(record.portal_url) if record.portal_url else None
+            )
+            self.tabs.addTab(self.discovery, "Discovery")
             self.tabs.addTab(self._build_hubmap_tab(), "HuBMAP")
             self.tabs.addTab(self._build_cellxgene_tab(), "CELLxGENE")
             self.tabs.addTab(self._build_ucsc_tab(), "UCSC Cell Browser")
-            self.tabs.addTab(self._build_h5ad_tab(), "Local H5AD")
+            self.tabs.addTab(self._build_h5ad_tab(), "Local H5AD / H5MU")
             self.setCentralWidget(self.tabs)
             self.statusBar().showMessage("Ready")
+
+        def closeEvent(self, event) -> None:
+            self.discovery.shutdown()
+            super().closeEvent(event)
+
+        def resolve_discovery_files(self, record: DatasetRecord) -> None:
+            client_type = {"HuBMAP": HuBMAPClient, "CELLxGENE Discover": CellxGeneDiscoverClient,
+                           "UCSC Cell Browser": UCSCCellBrowserClient}[record.source]
+
+            def resolve():
+                with client_type() as client:
+                    return client.resolve_assets(record)
+
+            try:
+                assets = run_read_task(self, "Finding files for selected dataset", resolve)
+            except (httpx.HTTPError, OSError, ValueError, TypeError, RuntimeError) as exc:
+                QMessageBox.critical(self, "File lookup failed", str(exc))
+                return
+            direct = [asset for asset in assets if not asset.raw.get("transfer_method")]
+            if record.source != "CELLxGENE Discover":
+                record.asset_status = "verified" if direct else "checked_no_direct"
+                if direct and "Direct download (verified)" not in record.acquisition_methods:
+                    record.acquisition_methods.append("Direct download (verified)")
+            self.discovery.set_records(list(self.discovery.model.records))
+            if not assets:
+                self._no_assets(record, "No direct files found among checked candidates. This is not proof of transfer-only access.")
+                return
+            self._download_asset_choice(assets, f"{record.source} files")
+
+        def export_discovery_manifest(self, record: DatasetRecord) -> None:
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Export HuBMAP CLT manifest", "hubmap-manifest.txt", "Text files (*.txt)"
+            )
+            if filename:
+                try:
+                    write_hubmap_manifest([record], Path(filename))
+                except (OSError, ValueError) as exc:
+                    QMessageBox.critical(self, "Manifest export failed", str(exc))
 
         def _build_hubmap_tab(self) -> QWidget:
             root = QWidget()
@@ -323,13 +372,13 @@ def main(*, smoke_test: bool = False) -> None:
             controls = QHBoxLayout()
             self.h5ad_file_label = QLineEdit()
             self.h5ad_file_label.setReadOnly(True)
-            self.h5ad_file_label.setPlaceholderText("Choose or download a local .h5ad file")
+            self.h5ad_file_label.setPlaceholderText("Choose or download a native .h5ad / .h5mu file")
             self.h5ad_annotation = QLineEdit()
             self.h5ad_annotation.setPlaceholderText("Optional obs annotation, e.g. cell_type")
             self.h5ad_max_points = QSpinBox()
             self.h5ad_max_points.setRange(100, 50000)
             self.h5ad_max_points.setValue(5000)
-            choose_button = QPushButton("Choose H5AD")
+            choose_button = QPushButton("Choose H5AD / H5MU")
             inspect_button = QPushButton("Inspect")
             html_button = QPushButton("Export HTML")
             json_button = QPushButton("Export JSON")
@@ -346,6 +395,13 @@ def main(*, smoke_test: bool = False) -> None:
             ):
                 controls.addWidget(widget)
             layout.addLayout(controls)
+            profile_controls = QHBoxLayout()
+            profile_controls.addWidget(QLabel("Manual scientific profile(s), optional"))
+            self.h5ad_modality = QLineEdit()
+            self.h5ad_modality.setPlaceholderText("Comma-separated: rna, atac, spatial_transcriptomics, spatial_proteomics, multiomics, spatial_metabolomics")
+            self.h5ad_modality.setToolTip("Recorded interpretation only; never supplies missing data, units, transforms or cell correspondence.")
+            profile_controls.addWidget(self.h5ad_modality)
+            layout.addLayout(profile_controls)
 
             summary = QWidget()
             summary_form = QFormLayout(summary)
@@ -381,11 +437,12 @@ def main(*, smoke_test: bool = False) -> None:
 
             def query():
                 with HuBMAPClient() as client:
-                    return client.search_datasets(**criteria)
+                    records = client.search_datasets(**criteria)
+                    return records, client.last_search
 
             try:
-                self.records = run_read_task(self, "HuBMAP search", query)
-            except (httpx.HTTPError, ValueError) as exc:
+                self.records, stats = run_read_task(self, "HuBMAP search", query)
+            except (httpx.HTTPError, ValueError, TypeError, RuntimeError) as exc:
                 QMessageBox.critical(self, "HuBMAP search failed", str(exc))
                 return
             self.table.clearSelection()
@@ -407,7 +464,17 @@ def main(*, smoke_test: bool = False) -> None:
             self.table.resizeColumnsToContents()
             if self.records:
                 self.table.selectRow(0)
-            self.statusBar().showMessage(f"Found {len(self.records)} HuBMAP datasets")
+            self._show_search_status("HuBMAP", stats)
+
+        def _show_search_status(self, source: str, stats: SearchStats) -> None:
+            scope = "catalog/query traversal complete" if stats.complete else "PARTIAL coverage"
+            message = f"{source}: {stats.returned} returned / {stats.matched} matched; {scope}"
+            if stats.truncated:
+                message += "; display limit applied"
+            if stats.warnings:
+                message += "; " + stats.warnings[0]
+            self.statusBar().showMessage(message)
+            self.statusBar().setToolTip("\n".join(stats.warnings))
 
         def selected_records(self) -> list[DatasetRecord]:
             rows = sorted({index.row() for index in self.table.selectedIndexes()})
@@ -491,11 +558,12 @@ def main(*, smoke_test: bool = False) -> None:
 
             def query():
                 with CellxGeneDiscoverClient() as client:
-                    return client.search_datasets(**criteria)
+                    records = client.search_datasets(**criteria)
+                    return records, client.last_search
 
             try:
-                self.cellxgene_records = run_read_task(self, "CELLxGENE search", query)
-            except (httpx.HTTPError, TypeError, ValueError) as exc:
+                self.cellxgene_records, stats = run_read_task(self, "CELLxGENE search", query)
+            except (httpx.HTTPError, TypeError, ValueError, RuntimeError) as exc:
                 QMessageBox.critical(self, "CELLxGENE Discover search failed", str(exc))
                 return
             self.cxg_table.clearSelection()
@@ -516,7 +584,7 @@ def main(*, smoke_test: bool = False) -> None:
             self.cxg_table.resizeColumnsToContents()
             if self.cellxgene_records:
                 self.cxg_table.selectRow(0)
-            self.statusBar().showMessage(f"Found {len(self.cellxgene_records)} CELLxGENE datasets")
+            self._show_search_status("CELLxGENE", stats)
 
         def download_cellxgene_product(self) -> None:
             record = self._selected_record(self.cxg_table, self.cellxgene_records, "CELLxGENE")
@@ -593,11 +661,12 @@ def main(*, smoke_test: bool = False) -> None:
 
             def query():
                 with UCSCCellBrowserClient() as client:
-                    return client.search_datasets(**criteria)
+                    records = client.search_datasets(**criteria)
+                    return records, client.last_search
 
             try:
-                self.ucsc_records = run_read_task(self, "UCSC search", query)
-            except (httpx.HTTPError, TypeError, ValueError) as exc:
+                self.ucsc_records, stats = run_read_task(self, "UCSC search", query)
+            except (httpx.HTTPError, TypeError, ValueError, RuntimeError) as exc:
                 QMessageBox.critical(self, "UCSC Cell Browser search failed", str(exc))
                 return
             self.ucsc_table.clearSelection()
@@ -618,7 +687,7 @@ def main(*, smoke_test: bool = False) -> None:
             self.ucsc_table.resizeColumnsToContents()
             if self.ucsc_records:
                 self.ucsc_table.selectRow(0)
-            self.statusBar().showMessage(f"Found {len(self.ucsc_records)} UCSC datasets")
+            self._show_search_status("UCSC", stats)
 
         def download_ucsc_product(self) -> None:
             record = self._selected_record(self.ucsc_table, self.ucsc_records, "UCSC")
@@ -683,7 +752,7 @@ def main(*, smoke_test: bool = False) -> None:
                 QMessageBox.critical(self, "Download failed", str(exc))
                 return
             self.statusBar().showMessage(f"Downloaded {destination}")
-            if asset.is_h5ad or destination.suffix.casefold() == ".h5ad":
+            if asset.is_h5ad or destination.suffix.casefold() in {".h5ad", ".h5mu"}:
                 self._use_downloaded_h5ad(destination)
             else:
                 QMessageBox.information(self, "Download complete", f"Saved:\n{destination}")
@@ -697,10 +766,10 @@ def main(*, smoke_test: bool = False) -> None:
                           self.h5ad_layers_label, self.h5ad_embeddings_label,
                           self.h5ad_annotation_label):
                 label.setText("Not inspected")
-            self.tabs.setCurrentIndex(3)
+            self.tabs.setCurrentIndex(4)
             answer = QMessageBox.question(
                 self,
-                "H5AD downloaded",
+                "Scientific file downloaded",
                 f"Saved {path.name}. Inspect it now with bounded memory?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
@@ -738,7 +807,7 @@ def main(*, smoke_test: bool = False) -> None:
 
         def choose_h5ad(self) -> None:
             filename, _ = QFileDialog.getOpenFileName(
-                self, "Choose an H5AD file", "", "AnnData files (*.h5ad);;All files (*)"
+                self, "Choose a scientific file", "", "H5AD / MuData files (*.h5ad *.h5mu);;All files (*)"
             )
             if not filename:
                 return
@@ -753,18 +822,19 @@ def main(*, smoke_test: bool = False) -> None:
 
         def inspect_h5ad_file(self) -> None:
             if self.h5ad_path is None:
-                QMessageBox.information(self, "No file selected", "Choose or download an H5AD first.")
+                QMessageBox.information(self, "No file selected", "Choose or download an H5AD / H5MU file first.")
                 return
             source = self.h5ad_path
             annotation = self.h5ad_annotation.text().strip() or None
             max_points = self.h5ad_max_points.value()
+            profiles = [value.strip() for value in self.h5ad_modality.text().split(",") if value.strip()]
             try:
                 self.h5ad_inspection = run_read_task(
-                    self, "Inspecting local H5AD",
-                    lambda: inspect_h5ad(source, annotation=annotation, max_points=max_points),
+                    self, "Inspecting native scientific file",
+                    lambda: inspect_scientific(source, annotation=annotation, max_points=max_points, modality_override=profiles),
                 )
             except (OSError, RuntimeError, ValueError) as exc:
-                QMessageBox.critical(self, "H5AD inspection failed", str(exc))
+                QMessageBox.critical(self, "Scientific inspection failed", str(exc))
                 return
 
             result = self.h5ad_inspection
@@ -786,7 +856,7 @@ def main(*, smoke_test: bool = False) -> None:
 
         def _require_h5ad_inspection(self) -> H5ADInspection | None:
             if self.h5ad_inspection is None:
-                QMessageBox.information(self, "Nothing to export", "Inspect an H5AD file first.")
+                QMessageBox.information(self, "Nothing to export", "Inspect an H5AD / H5MU file first.")
             return self.h5ad_inspection
 
         def export_h5ad_html(self) -> None:
@@ -795,12 +865,15 @@ def main(*, smoke_test: bool = False) -> None:
                 return
             filename, _ = QFileDialog.getSaveFileName(
                 self,
-                "Export H5AD HTML report",
+                "Export scientific HTML report",
                 f"{Path(result.file_name).stem}-summary.html",
                 "HTML files (*.html)",
             )
             if filename:
-                write_h5ad_report(result, Path(filename))
+                try:
+                    write_h5ad_report(result, Path(filename))
+                except (OSError, ValueError) as exc:
+                    QMessageBox.critical(self, "H5AD export failed", str(exc))
 
         def export_h5ad_json(self) -> None:
             result = self._require_h5ad_inspection()
@@ -808,18 +881,29 @@ def main(*, smoke_test: bool = False) -> None:
                 return
             filename, _ = QFileDialog.getSaveFileName(
                 self,
-                "Export H5AD JSON inspection",
+                "Export scientific JSON inspection",
                 f"{Path(result.file_name).stem}-summary.json",
                 "JSON files (*.json)",
             )
             if filename:
-                Path(filename).write_text(result.model_dump_json(indent=2), encoding="utf-8")
+                try:
+                    destination = validate_export_destination(result, filename)
+                    destination.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+                except (OSError, ValueError) as exc:
+                    QMessageBox.critical(self, "H5AD export failed", str(exc))
 
     app = QApplication(sys.argv)
     window = Window()
     window.show()
     if smoke_test:
-        assert window.tabs.count() == 4
+        from importlib.resources import files
+
+        # Exercise data-file lookup inside the frozen and installed desktop bundles.
+        assets = files("cellondesk").joinpath("report_assets", "h5ad")
+        for name in ("shell.html", "dashboard.css", "core.js", "embeddings.js",
+                     "composition.js", "qc.js", "modalities.js", "dashboard.js"):
+            assert assets.joinpath(name).read_text(encoding="utf-8")
+        assert window.tabs.count() == 5
         # Exercise the worker/event-loop boundary in the actual packaged app.
         assert run_read_task(window, "Desktop smoke test", lambda: 42) == 42
         QTimer.singleShot(100, app.quit)

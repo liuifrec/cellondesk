@@ -2,6 +2,65 @@
 
 **CellOnDesk** is a local-first browser and command-line toolkit for discovering public single-cell and spatial-omics datasets, acquiring useful source files, inspecting large local H5AD files with bounded memory, and producing portable offline review reports.
 
+## Unified discovery (0.12.0 development milestone)
+
+The new **Discovery** tab searches HuBMAP, CELLxGENE Discover and UCSC Cell Browser
+with distinct keyword, tissue, organism, assay and scientific-modality controls. Results arrive
+independently, with source errors, coverage limits and cache/timing information.
+Sort and filter locally, inspect source metadata, then find files or export a
+HuBMAP CLT manifest for the selected dataset. Publication, public access,
+advertised files and verified direct downloads remain separate states.
+
+CELLxGENE and UCSC public metadata use a 24-hour disk cache with an explicit
+refresh control. HuBMAP evaluates organ/assay aliases before limiting results;
+UCSC traverses collections even when only a child matches. Existing source tabs,
+advanced functionality and the H5AD dashboard remain available.
+
+See [discovery architecture, measured latency and remaining limits](docs/DISCOVERY_ARCHITECTURE.md).
+
+## Modality-aware dashboards (0.12.0 development milestone)
+
+The general report now adds evidence-based scientific profiles and a panel
+capability registry. Typed RNA, ATAC, protein and molecular-ion features can
+coexist. Scientific modules show bounded stored feature values, recorded QC,
+spatial coordinates and embedded images when those data exist. Unknown files
+remain unclassified. Coordinates preserve their numeric geometry; images are
+previewed independently because registration has not been validated.
+
+Native H5MU inspection retains module matrices and checks explicit observation
+and feature maps. It does not construct a joint matrix or infer biological
+pairing. Manual profiles record an interpretation without supplying missing data.
+Search modality facets use **assay-derived repository hints**; advertised local
+format support and file-verified evidence remain separate.
+
+```bash
+cellondesk inspect-scientific sample.h5mu --html sample.html --json sample.json
+cellondesk inspect-h5ad ambiguous.h5ad --modality spatial_proteomics --html report.html
+```
+
+The desktop **Local H5AD / H5MU** workspace supports the same reader and optional
+manual profiles. Export remains one self-contained offline HTML file. SpatialData,
+Zarr, OME imaging and imzML readers, calibrated overlays, segmentation,
+neighborhoods and joint multiomic analyses are planned, not implemented here.
+See the [capability matrix, phases and validation](docs/MODALITY_ARCHITECTURE.md)
+and [public fixture provenance](tests/fixtures/public_modalities/README.md).
+
+## H5AD dashboard (0.12.0 development milestone)
+
+Local H5AD reports now include a dataset overview, interactive categorical and
+numeric embedding colors, observation-composition bars and sample cross-tabulations,
+histograms of existing numeric metadata, and explicit provenance and integrity
+limits. HTML, CSS and JavaScript are maintained separately and exported as one
+offline HTML file; no network access or browser-side dependencies are required.
+
+Reads remain bounded and support modern and legacy AnnData layouts. Every chart
+states its sample denominator, missing values remain visible, and invalid
+coordinates retain their original row identities for metadata alignment. No QC
+metrics are invented or computed from X. The source H5AD is opened read-only.
+
+See the [architecture and phased implementation](docs/H5AD_DASHBOARD_ARCHITECTURE.md)
+for sampling contracts, validation commands and the remaining milestones.
+
 ## Reliability update (0.11.3 preview)
 
 This pass hardens acquisition rather than adding another analysis backend:
@@ -14,7 +73,7 @@ This pass hardens acquisition rather than adding another analysis backend:
 
 See [the repository audit](docs/RELIABILITY_AUDIT.md) for tests and remaining gaps.
 
-> **Status:** technical alpha (`0.11.3` internal Windows desktop preview). Real-machine testing, source-vocabulary validation, public-release hardening, and broader real-dataset validation are still in progress.
+> **Status:** technical alpha (`0.12.0` development milestone, not a published release). Real-machine testing, source-vocabulary validation, public-release hardening, and broader real-dataset validation are still in progress.
 
 ## Current capabilities
 
@@ -37,12 +96,13 @@ CellOnDesk is a preview, acquisition, and review tool. It does not replace Scanp
 
 ## Windows desktop preview
 
-The Windows installer is designed for per-user installation without requiring Python, Git, or administrator privileges. The desktop has four workspaces:
+The Windows installer is designed for per-user installation without requiring Python, Git, or administrator privileges. The desktop has five workspaces:
 
-1. **HuBMAP** — search by ordinary organ name or assay, inspect access metadata, find direct H5AD products, save an official CLT bulk-transfer manifest when direct files are not available, open the portal, and export HTML summaries.
-2. **CELLxGENE** — search Discover by tissue, disease, organism, cell type, or text and download the published source H5AD advertised by the official dataset feed. Optional Census/SOMA gene previews remain available only when the extra Census dependency is installed.
-3. **UCSC Cell Browser** — search the public catalog and download verified matrix/metadata files where available, with analysis-ready H5AD/expression resources listed before metadata and coordinate-only files and the browser page retained as a fallback.
-4. **Local H5AD** — inspect real AnnData files with bounded memory and export HTML/JSON structural reports.
+1. **Discovery** — common scientific filters, independent source progress/errors, cached public catalogs, normalized results, local sorting/filtering and selected-dataset acquisition.
+2. **HuBMAP** — search by ordinary organ name or assay, inspect access metadata, find direct H5AD products, save an official CLT bulk-transfer manifest, open the portal, and export HTML summaries.
+3. **CELLxGENE** — search Discover by tissue, disease, organism, cell type, or text and download the published source H5AD advertised by the official dataset feed. Optional Census/SOMA gene previews remain available only when the extra Census dependency is installed.
+4. **UCSC Cell Browser** — search the public catalog and download verified matrix/metadata files where available, with analysis-ready H5AD/expression resources listed before metadata and coordinate-only files and the browser page retained as a fallback.
+5. **Local H5AD / H5MU** — inspect native files with bounded memory, review scientific capabilities, record optional profile interpretations, and export offline HTML/JSON reports.
 
 The packaged native Windows preview intentionally does **not** bundle `cellxgene-census` because the SOMA dependency stack is not a normal native-Windows deployment target. CELLxGENE dataset discovery and H5AD acquisition do not require that dependency; the optional native Census analysis controls activate automatically in compatible Python environments.
 
@@ -92,7 +152,7 @@ This acquisition path is distinct from the optional Census/SOMA analytical inter
 
 ## UCSC Cell Browser discovery
 
-The desktop adapter reads the public Cell Browser catalog and expands matching collections to datasets. Use ordinary search terms such as `kidney`, an organism such as `Human`, or project/assay keywords. CellOnDesk resolves and verifies conventional matrix, metadata, coordinate, and H5AD-like resources when possible. Because UCSC collections do not universally provide a canonical AnnData file, the desktop prioritizes H5AD/expression matrices first, then metadata, then coordinate-only resources; otherwise **Open portal** remains available.
+The desktop adapter reads the public Cell Browser catalog and traverses nested collections before filtering leaves, including matches absent from parent metadata. Use ordinary search terms such as `kidney`, an organism such as `Human`, or project/assay keywords. Explicit selected-file lookup resolves and verifies matrix, metadata, coordinate, and H5AD-like resources. Because UCSC collections do not universally provide a canonical AnnData file, the desktop prioritizes H5AD/expression matrices first, then metadata, then coordinate-only resources; otherwise **Open portal** remains available.
 
 A future UCSC import workflow can build on this by downloading a recommended expression/metadata/coordinate bundle and converting recognized layouts into a local H5AD. That conversion is intentionally separate from simple file acquisition because Cell Browser datasets use heterogeneous formats.
 

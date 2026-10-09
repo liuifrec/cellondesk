@@ -2,14 +2,24 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from .modality import ModalityReport
 
 
 class ValueCount(BaseModel):
     value: str
     count: int
+    is_missing: bool = False
+
+
+class Histogram(BaseModel):
+    edges: list[float] = Field(default_factory=list)
+    counts: list[int] = Field(default_factory=list)
+    # All bins are [left, right), except the final bin, which includes right.
+    last_bin_closed: bool = True
 
 
 class NumericSummary(BaseModel):
@@ -21,6 +31,7 @@ class NumericSummary(BaseModel):
     p05: float | None = None
     median: float | None = None
     p95: float | None = None
+    histogram: Histogram | None = None
 
 
 class ColumnSummary(BaseModel):
@@ -32,6 +43,9 @@ class ColumnSummary(BaseModel):
     unique: int | None = None
     top_values: list[ValueCount] = Field(default_factory=list)
     numeric: NumericSummary | None = None
+    total_values: int | None = None
+    sampled_values: int | None = None
+    missing_values: int | None = None
 
 
 class MatrixSummary(BaseModel):
@@ -45,6 +59,39 @@ class MatrixSummary(BaseModel):
     sample_minimum: float | None = None
     sample_maximum: float | None = None
     sample_mean: float | None = None
+    sample_scope: str = "Not recorded by this inspection"
+    sampled_entries: int | None = None
+    nonfinite_entries: int | None = None
+
+
+class ObservationColumn(BaseModel):
+    name: str
+    kind: Literal["categorical", "numeric"]
+    values: list[float | str | None] = Field(default_factory=list)
+
+
+class ObservationSample(BaseModel):
+    total_rows: int
+    row_indices: list[int] = Field(default_factory=list)
+    columns: list[ObservationColumn] = Field(default_factory=list)
+    method: str = "Deterministic evenly spaced rows; not a random sample"
+
+
+class InspectionProvenance(BaseModel):
+    generator_version: str
+    inspected_at: str
+    source_mtime_ns: int
+    source_stat_unchanged: bool
+    encoding_type: str
+    encoding_version: str
+    limits: dict[str, int] = Field(default_factory=dict)
+    dependencies: dict[str, str] = Field(default_factory=dict)
+    read_only: bool = True
+    integrity_scope: str = (
+        "Bounded structural and sampled-value checks only; no checksum, full sparse "
+        "pointer/index validation or exhaustive scan of unsampled values. "
+        "Unchanged file size/mtime is not proof of content integrity."
+    )
 
 
 class EmbeddingPreview(BaseModel):
@@ -54,6 +101,9 @@ class EmbeddingPreview(BaseModel):
     sampled_points: list[list[float]] = Field(default_factory=list)
     color_field: str | None = None
     color_values: list[str] = Field(default_factory=list)
+    row_indices: list[int] = Field(default_factory=list)
+    candidate_points: int | None = None
+    dropped_nonfinite: int | None = None
 
 
 class H5ADInspection(BaseModel):
@@ -74,6 +124,12 @@ class H5ADInspection(BaseModel):
     likely_annotation: str | None = None
     embeddings: list[EmbeddingPreview] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    schema_version: int = 2
+    obs_sample: ObservationSample | None = None
+    embedding_metadata: ObservationSample | None = None
+    provenance: InspectionProvenance | None = None
+    storage_format: str = "H5AD"
+    scientific: ModalityReport | None = None
 
 
 _ANNOTATION_CANDIDATES = (
@@ -95,9 +151,7 @@ def _require_data_dependencies() -> tuple[Any, Any]:
         import h5py
         import numpy as np
     except ImportError as exc:  # pragma: no cover - optional environment
-        raise RuntimeError(
-            'Install H5AD support with: pip install "cellondesk[data]"'
-        ) from exc
+        raise RuntimeError('Install H5AD support with: pip install "cellondesk[data]"') from exc
     return h5py, np
 
 
@@ -117,51 +171,42 @@ def _decode_array(values: Any) -> list[Any]:
 
 
 def _encoding(node: Any) -> str:
-    value = node.attrs.get("encoding-type")
-    if value is not None:
-        return str(_decode_scalar(value))
-    return "dataset" if hasattr(node, "dtype") else "group"
+    from .h5ad_access import _encoding as encoding
+
+    return encoding(node)
 
 
 def _shape_from_node(node: Any) -> tuple[int, ...]:
     if hasattr(node, "shape"):
-        return tuple(int(value) for value in node.shape)
-    shape = node.attrs.get("shape")
+        return tuple(int(value) for value in (node.shape or ()))
+    shape = node.attrs.get("shape", node.attrs.get("h5sparse_shape"))
     if shape is not None:
         return tuple(int(value) for value in shape)
     return ()
 
 
 def _axis_column_names(group: Any) -> list[str]:
-    order = group.attrs.get("column-order")
-    if order is not None:
-        return [str(value) for value in _decode_array(order)]
-    index_name = str(_decode_scalar(group.attrs.get("_index", "_index")))
-    return sorted(
-        key
-        for key in group
-        if key not in {index_name, "__categories"} and not key.startswith("_")
-    )
+    from .h5ad_access import _axis_column_names as column_names
+
+    return column_names(group)
 
 
 def _axis_length(group: Any) -> int:
-    index_name = str(_decode_scalar(group.attrs.get("_index", "_index")))
-    if index_name in group:
-        return _node_length(group[index_name])
-    for key in _axis_column_names(group):
-        if key in group:
-            return _node_length(group[key])
-    return 0
+    from .h5ad_access import _axis_length as axis_length
+
+    return axis_length(group)
 
 
 def _node_length(node: Any) -> int:
     shape = _shape_from_node(node)
     if shape:
         return shape[0]
-    if "codes" in node:
-        return int(node["codes"].shape[0])
-    if "values" in node:
-        return int(node["values"].shape[0])
+    if hasattr(node, "keys") and "codes" in node:
+        shape = _shape_from_node(node["codes"])
+        return shape[0] if shape else 0
+    if hasattr(node, "keys") and "values" in node:
+        shape = _shape_from_node(node["values"])
+        return shape[0] if shape else 0
     return 0
 
 
@@ -202,7 +247,18 @@ def _read_node_values(node: Any, indices: Any, np: Any) -> list[Any]:
         return result
     if hasattr(node, "dtype"):
         return _decode_array(node[indices])
-    return []
+    raise ValueError(f"Unsupported metadata encoding: {encoding}")
+
+
+def _finite_mean(finite: Any, np: Any) -> float | None:
+    if not finite.size:
+        return None
+    with np.errstate(over="ignore", invalid="ignore"):
+        mean = float(np.mean(finite))
+    if not np.isfinite(mean):
+        scale = float(np.max(np.abs(finite)))
+        mean = float(np.mean(finite / scale) * scale) if scale else 0.0
+    return mean
 
 
 def _summarize_column(
@@ -212,11 +268,13 @@ def _summarize_column(
     max_values: int,
     max_top_values: int,
     np: Any,
+    values: list[Any] | None = None,
 ) -> ColumnSummary:
     length = _node_length(node)
     indices = _sample_indices(length, max_values, np)
-    values = _read_node_values(node, indices, np)
-    sampled = len(indices) < length
+    if values is None:
+        values = _read_node_values(node, indices, np)
+    sampled = len(values) < length
     dtype = "unknown"
     if hasattr(node, "dtype"):
         dtype = str(node.dtype)
@@ -227,16 +285,21 @@ def _summarize_column(
 
     # NaN/Inf are missing for numeric summaries, not distinct category values.
     non_missing = [
-        value for value in values
-        if value is not None and not (
-            isinstance(value, (float, np.floating)) and not np.isfinite(value)
-        )
+        value
+        for value in values
+        if value is not None
+        and not (isinstance(value, (float, np.floating)) and not np.isfinite(value))
     ]
     non_null = len(non_missing)
     encoding = _encoding(node)
+    coverage = {
+        "total_values": length,
+        "sampled_values": len(values),
+        "missing_values": len(values) - non_null,
+    }
 
     numeric_values: list[float] = []
-    numeric = encoding != "categorical"
+    numeric = encoding != "categorical" and dtype != "category"
     for value in non_missing if numeric else []:
         if isinstance(value, (bool, str, bytes)):
             numeric = False
@@ -251,16 +314,23 @@ def _summarize_column(
         array = np.asarray(numeric_values, dtype=float)
         finite = array[np.isfinite(array)]
         if finite.size:
-            quantiles = np.quantile(finite, [0.05, 0.5, 0.95])
+            with np.errstate(over="ignore", invalid="ignore"):
+                quantiles = np.quantile(finite, [0.05, 0.5, 0.95])
+            if not np.isfinite(quantiles).all():
+                scale = float(np.max(np.abs(finite)))
+                quantiles = np.quantile(finite / scale, [0.05, 0.5, 0.95]) * scale
+            from .h5ad_dashboard import numeric_histogram
+
             numeric_summary = NumericSummary(
                 count=int(finite.size),
                 missing=len(values) - int(finite.size),
                 minimum=float(np.min(finite)),
                 maximum=float(np.max(finite)),
-                mean=float(np.mean(finite)),
+                mean=_finite_mean(finite, np),
                 p05=float(quantiles[0]),
                 median=float(quantiles[1]),
                 p95=float(quantiles[2]),
+                histogram=numeric_histogram(finite, np),
             )
         else:
             numeric_summary = NumericSummary(count=0, missing=len(values))
@@ -272,13 +342,23 @@ def _summarize_column(
             non_null=non_null,
             unique=len(set(numeric_values)),
             numeric=numeric_summary,
+            **coverage,
         )
 
     labels = [str(value) for value in non_missing]
     counts = Counter(labels)
     unique = len(counts)
+    top_values = [
+        ValueCount(value=value, count=count) for value, count in counts.most_common(max_top_values)
+    ]
     if len(non_missing) < len(values):
-        counts["Missing"] += len(values) - len(non_missing)
+        top_values.append(
+            ValueCount(
+                value="Missing",
+                count=len(values) - len(non_missing),
+                is_missing=True,
+            )
+        )
     return ColumnSummary(
         name=name,
         dtype=dtype,
@@ -286,10 +366,8 @@ def _summarize_column(
         sampled=sampled,
         non_null=non_null,
         unique=unique,
-        top_values=[
-            ValueCount(value=value, count=count)
-            for value, count in counts.most_common(max_top_values)
-        ],
+        top_values=top_values,
+        **coverage,
     )
 
 
@@ -299,6 +377,8 @@ def _matrix_summary(handle: Any, n_obs: int, n_vars: int, np: Any) -> MatrixSumm
     node = handle["X"]
     encoding = _encoding(node)
     shape = _shape_from_node(node)
+    if shape and (len(shape) != 2 or any(size < 0 for size in shape)):
+        raise ValueError("X shape must have two nonnegative dimensions")
     matrix_shape = (
         int(shape[0]) if len(shape) >= 1 else n_obs,
         int(shape[1]) if len(shape) >= 2 else n_vars,
@@ -306,6 +386,8 @@ def _matrix_summary(handle: Any, n_obs: int, n_vars: int, np: Any) -> MatrixSumm
     total = matrix_shape[0] * matrix_shape[1]
     if hasattr(node, "keys") and "data" in node:
         data = node["data"]
+        if len(_shape_from_node(data)) != 1 or data.dtype.kind not in "biuf":
+            raise ValueError("Sparse X data must be a numeric vector")
         nnz = int(data.shape[0])
         sample = np.asarray(data[: min(nnz, 10000)], dtype=float)
         finite = sample[np.isfinite(sample)] if sample.size else sample
@@ -319,9 +401,17 @@ def _matrix_summary(handle: Any, n_obs: int, n_vars: int, np: Any) -> MatrixSumm
             sample_total=int(finite.size),
             sample_minimum=float(np.min(finite)) if finite.size else None,
             sample_maximum=float(np.max(finite)) if finite.size else None,
-            sample_mean=float(np.mean(finite)) if finite.size else None,
+            sample_mean=_finite_mean(finite, np),
+            sample_scope=(
+                "First 10,000 stored entries at most; includes explicit zeros, "
+                "excludes implicit zeros. Mean/range describe these stored values only."
+            ),
+            sampled_entries=int(sample.size),
+            nonfinite_entries=int(sample.size - finite.size),
         )
-    if hasattr(node, "dtype") and len(matrix_shape) == 2:
+    if hasattr(node, "dtype") and len(shape) == 2:
+        if node.dtype.kind not in "biuf":
+            raise ValueError("Dense X must contain real numeric values")
         rows = min(matrix_shape[0], 128)
         columns = min(matrix_shape[1], 128)
         sample = np.asarray(node[:rows, :columns], dtype=float)
@@ -336,7 +426,10 @@ def _matrix_summary(handle: Any, n_obs: int, n_vars: int, np: Any) -> MatrixSumm
             density=(nonzero / finite.size) if finite.size else None,
             sample_minimum=float(np.min(finite)) if finite.size else None,
             sample_maximum=float(np.max(finite)) if finite.size else None,
-            sample_mean=float(np.mean(finite)) if finite.size else None,
+            sample_mean=_finite_mean(finite, np),
+            sample_scope="Leading block of at most 128 × 128 entries; not a random sample.",
+            sampled_entries=int(sample.size),
+            nonfinite_entries=int(sample.size - finite.size),
         )
     return MatrixSummary(shape=matrix_shape, encoding=encoding)
 
@@ -358,71 +451,6 @@ def _choose_annotation(column_names: list[str], requested: str | None) -> str | 
     return None
 
 
-def _embedding_previews(
-    handle: Any,
-    *,
-    n_obs: int,
-    annotation: str | None,
-    max_points: int,
-    np: Any,
-) -> tuple[list[EmbeddingPreview], list[str]]:
-    warnings: list[str] = []
-    if "obsm" not in handle:
-        return [], warnings
-    obsm = handle["obsm"]
-    keys = list(obsm.keys())
-    priority = {"X_umap": 0, "spatial": 1, "X_spatial": 1, "X_tsne": 2, "X_pca": 3}
-    keys.sort(key=lambda key: (priority.get(key, 10), key))
-    indices = _sample_indices(n_obs, max_points, np)
-    color_values: list[str] = []
-    if annotation and "obs" in handle and annotation in handle["obs"]:
-        raw_colors = _read_node_values(handle["obs"][annotation], indices, np)
-        color_values = ["Missing" if value is None else str(value) for value in raw_colors]
-
-    previews: list[EmbeddingPreview] = []
-    for key in keys:
-        if key.casefold().startswith("velocity"):
-            warnings.append(f"Excluded vector field {key!r} from coordinate embeddings.")
-            continue
-        node = obsm[key]
-        shape = _shape_from_node(node)
-        if not hasattr(node, "dtype") or len(shape) != 2 or shape[1] < 2:
-            warnings.append(f"Skipped unsupported embedding {key!r} with shape {shape or 'unknown'}.")
-            continue
-        if shape[0] != n_obs:
-            warnings.append(f"Skipped embedding {key!r}: row count does not match observations.")
-            continue
-        try:
-            coordinates = np.asarray(node[indices, :2], dtype=float)
-        except (TypeError, ValueError, IndexError) as exc:
-            warnings.append(f"Could not sample embedding {key!r}: {exc}")
-            continue
-        finite_rows = np.isfinite(coordinates).all(axis=1)
-        coordinates = coordinates[finite_rows]
-        colors = (
-            [
-                color
-                for color, keep in zip(color_values, finite_rows, strict=False)
-                if bool(keep)
-            ]
-            if color_values
-            else []
-        )
-        previews.append(
-            EmbeddingPreview(
-                key=key,
-                total_points=int(shape[0]),
-                dimensions=int(shape[1]),
-                sampled_points=coordinates.tolist(),
-                color_field=annotation if colors else None,
-                color_values=colors,
-            )
-        )
-        if len(previews) >= 4:
-            break
-    return previews, warnings
-
-
 def inspect_h5ad(
     path: str | Path,
     *,
@@ -431,106 +459,17 @@ def inspect_h5ad(
     max_column_values: int = 20000,
     max_obs_columns: int = 50,
     max_var_columns: int = 30,
+    modality_override: list[str] | tuple[str, ...] | None = None,
 ) -> H5ADInspection:
-    """Inspect a standard AnnData H5AD file without loading its expression matrix."""
-    h5py, np = _require_data_dependencies()
-    source = Path(path).expanduser().resolve()
-    if not source.exists():
-        raise FileNotFoundError(source)
-    if source.suffix.lower() != ".h5ad":
-        raise ValueError(f"Expected an .h5ad file, received: {source.name}")
-    if max_points < 1:
-        raise ValueError("max_points must be positive")
+    """Inspect modern and legacy H5AD files through the shared bounded reader."""
+    from .h5ad_compat import inspect_h5ad as inspect
 
-    warnings: list[str] = []
-    with h5py.File(source, "r") as handle:
-        obs_group = handle.get("obs")
-        var_group = handle.get("var")
-        n_obs = _axis_length(obs_group) if obs_group is not None else 0
-        n_vars = _axis_length(var_group) if var_group is not None else 0
-        matrix = _matrix_summary(handle, n_obs, n_vars, np)
-        if not n_obs:
-            n_obs = matrix.shape[0]
-        if not n_vars:
-            n_vars = matrix.shape[1]
-
-        obs_names = _axis_column_names(obs_group) if obs_group is not None else []
-        var_names = _axis_column_names(var_group) if var_group is not None else []
-        likely_annotation = _choose_annotation(obs_names, annotation)
-        if annotation and likely_annotation is None:
-            warnings.append(f"Requested annotation column {annotation!r} was not found.")
-
-        selected_obs_names = obs_names[:max_obs_columns]
-        if likely_annotation and likely_annotation not in selected_obs_names:
-            selected_obs_names.append(likely_annotation)
-        obs_columns = (
-            [
-                _summarize_column(
-                    name,
-                    obs_group[name],
-                    max_values=max_column_values,
-                    max_top_values=12,
-                    np=np,
-                )
-                for name in selected_obs_names
-                if name in obs_group
-            ]
-            if obs_group is not None
-            else []
-        )
-        var_columns = (
-            [
-                _summarize_column(
-                    name,
-                    var_group[name],
-                    max_values=max_column_values,
-                    max_top_values=12,
-                    np=np,
-                )
-                for name in var_names[:max_var_columns]
-                if name in var_group
-            ]
-            if var_group is not None
-            else []
-        )
-
-        embeddings, embedding_warnings = _embedding_previews(
-            handle,
-            n_obs=n_obs,
-            annotation=likely_annotation,
-            max_points=max_points,
-            np=np,
-        )
-        warnings.extend(embedding_warnings)
-
-        if len(obs_names) > len(obs_columns):
-            warnings.append(
-                f"Detailed summaries include {len(obs_columns)} of {len(obs_names)} obs columns "
-                "(the detected annotation is retained even when it falls beyond the normal limit)."
-            )
-        if len(var_names) > max_var_columns:
-            warnings.append(
-                f"Detailed summaries were limited to {max_var_columns} of {len(var_names)} var columns."
-            )
-        if not embeddings:
-            warnings.append("No two-dimensional previewable embedding was found in obsm.")
-
-        return H5ADInspection(
-            source_path=str(source),
-            file_name=source.name,
-            file_size_bytes=source.stat().st_size,
-            n_obs=n_obs,
-            n_vars=n_vars,
-            matrix=matrix,
-            obs_column_names=obs_names,
-            var_column_names=var_names,
-            obs_columns=obs_columns,
-            var_columns=var_columns,
-            layers=sorted(handle["layers"].keys()) if "layers" in handle else [],
-            obsm=sorted(handle["obsm"].keys()) if "obsm" in handle else [],
-            uns=sorted(handle["uns"].keys()) if "uns" in handle else [],
-            has_raw="raw" in handle,
-            likely_annotation=likely_annotation,
-            embeddings=embeddings,
-            warnings=warnings,
-        )
+    return inspect(
+        path,
+        max_points=max_points,
+        annotation=annotation,
+        max_column_values=max_column_values,
+        max_obs_columns=max_obs_columns,
+        max_var_columns=max_var_columns,
+        modality_override=modality_override,
+    )

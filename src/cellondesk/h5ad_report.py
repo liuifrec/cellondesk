@@ -1,11 +1,17 @@
+"""Assemble packaged dashboard components into a single portable HTML document."""
+
 from __future__ import annotations
 
 import html
 import json
+from importlib.resources import files
 from pathlib import Path
+from string import Template
 from typing import Any
 
+from ._version import __version__
 from .inspection import H5ADInspection
+from .modality_report import scientific_markup
 
 
 def _escape(value: object) -> str:
@@ -13,157 +19,227 @@ def _escape(value: object) -> str:
 
 
 def _format_bytes(value: int) -> str:
-    units = ("B", "KB", "MB", "GB", "TB")
     amount = float(value)
-    for unit in units:
-        if abs(amount) < 1024 or unit == units[-1]:
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(amount) < 1024 or unit == "TiB":
             return f"{amount:.1f} {unit}"
         amount /= 1024
     return f"{value} B"
 
 
 def _format_number(value: float | None) -> str:
-    if value is None:
-        return "—"
-    if abs(value) >= 1000 or (value and abs(value) < 0.001):
-        return f"{value:.3g}"
-    return f"{value:.3f}".rstrip("0").rstrip(".")
+    return "Not available" if value is None else f"{value:,.5g}"
 
 
 def _column_rows(columns: list[Any]) -> str:
-    rows: list[str] = []
+    rows = []
     for column in columns:
         top = ", ".join(
-            f"{item.value} ({item.count})" for item in column.top_values[:5]
+            f"{'∅ missing' if item.is_missing else item.value} ({item.count:,})"
+            for item in column.top_values[:5]
         )
-        if column.numeric:
-            detail = (
-                f"median {_format_number(column.numeric.median)}; "
-                f"p05–p95 {_format_number(column.numeric.p05)}–"
-                f"{_format_number(column.numeric.p95)}"
-            )
+        detail = (
+            f"median {_format_number(column.numeric.median)}; "
+            f"p05–p95 {_format_number(column.numeric.p05)}–"
+            f"{_format_number(column.numeric.p95)}"
+            if column.numeric
+            else top or "No non-missing values"
+        )
+        coverage = "Sampled" if column.sampled else "All rows"
+        if column.sampled_values is not None:
+            coverage += f" · {column.sampled_values:,} / {column.total_values:,}"
         else:
-            detail = top or "—"
-        sampled = "sampled" if column.sampled else "complete"
+            coverage += " · count not recorded"
         rows.append(
             "<tr>"
-            f"<td>{_escape(column.name)}</td>"
-            f"<td>{_escape(column.dtype)}</td>"
-            f"<td>{_escape(column.encoding)}</td>"
-            f"<td>{_escape(sampled)}</td>"
-            f"<td>{_escape(detail)}</td>"
-            "</tr>"
+            + "".join(
+                f"<td>{_escape(value)}</td>"
+                for value in (
+                    column.name,
+                    column.dtype,
+                    column.encoding,
+                    coverage,
+                    column.missing_values if column.missing_values is not None else "Not recorded",
+                    detail,
+                )
+            )
+            + "</tr>"
         )
-    return "".join(rows) or '<tr><td colspan="5">No columns found.</td></tr>'
+    return "".join(rows) or '<tr><td colspan="6">No detailed columns available.</td></tr>'
+
+
+def _kv(rows: list[tuple[str, object]]) -> str:
+    return "".join(
+        f'<tr><th scope="row">{_escape(key)}</th><td>{_escape(value)}</td></tr>'
+        for key, value in rows
+    )
 
 
 def render_h5ad_report(
     inspection: H5ADInspection,
     *,
-    title: str = "CellOnDesk H5AD Summary",
+    title: str | None = None,
 ) -> str:
-    """Render a self-contained HTML dashboard for a local H5AD inspection."""
+    """Render offline HTML without reading or modifying the source H5AD."""
+    if title is None:
+        title = f"CellOnDesk {inspection.storage_format} Summary"
+    resources = files("cellondesk").joinpath("report_assets", "h5ad")
+    template = Template(resources.joinpath("shell.html").read_text(encoding="utf-8"))
+    # Escape all markup delimiters, including script endings and HTML comments.
     payload = json.dumps(
         inspection.model_dump(mode="json"),
         ensure_ascii=False,
         separators=(",", ":"),
-    ).replace("</", "<\\/")
-    matrix = inspection.matrix
-    density = f"{matrix.density * 100:.3f}%" if matrix.density is not None else "—"
-    warnings = "".join(f"<li>{_escape(item)}</li>" for item in inspection.warnings)
-    warnings = warnings or "<li>No structural warnings.</li>"
-    embedding_options = "".join(
-        f'<option value="{index}">{_escape(item.key)} '
-        f'({len(item.sampled_points):,} sampled)</option>'
-        for index, item in enumerate(inspection.embeddings)
+        allow_nan=False,
     )
-    if not embedding_options:
-        embedding_options = '<option value="">No preview available</option>'
-
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{_escape(title)}</title>
-<style>
-:root{{--ink:#23313a;--muted:#65737d;--line:#d8e0e5;--panel:#fff;--bg:#f4f6f8;--accent:#167f9c;--warn:#e9a23b}}
-*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
-header{{padding:23px 30px;background:#253942;color:white}}header h1{{margin:0;font-size:25px}}header p{{margin:5px 0 0;color:#ced9dd}}
-nav{{position:sticky;top:0;z-index:3;background:#fff;border-bottom:1px solid var(--line);padding:0 28px}}
-nav button{{padding:14px 17px;border:0;border-bottom:3px solid transparent;background:none;color:var(--muted);font-weight:650;cursor:pointer}}
-nav button.active{{color:var(--accent);border-bottom-color:var(--accent)}}main{{max-width:1400px;margin:auto;padding:24px}}
-.tab{{display:none}}.tab.active{{display:block}}.grid{{display:grid;gap:16px}}.metrics{{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}}.two{{grid-template-columns:repeat(auto-fit,minmax(350px,1fr))}}
-.card{{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:18px;box-shadow:0 1px 2px #0000000d}}.metric strong{{display:block;font-size:28px;color:var(--accent)}}.metric span,.muted{{color:var(--muted)}}
-h2{{font-size:18px;margin:0 0 13px}}.warning{{border-left:5px solid var(--warn)}}.warning ul{{margin:0;padding-left:20px}}
-table{{width:100%;border-collapse:collapse}}th,td{{padding:9px 10px;border-bottom:1px solid #e5eaed;text-align:left;vertical-align:top}}th{{background:#edf2f4;position:sticky;top:0}}.table-wrap{{max-height:65vh;overflow:auto;border:1px solid var(--line)}}
-.controls{{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}}select{{padding:8px 10px;border:1px solid #bcc7cd;border-radius:5px;background:white}}canvas{{display:block;width:100%;height:min(68vh,680px);background:#fff;border:1px solid var(--line);border-radius:5px}}
-.legend{{display:flex;flex-wrap:wrap;gap:7px 13px;margin-top:10px;max-height:105px;overflow:auto}}.legend-item{{display:flex;gap:5px;align-items:center;font-size:12px}}.swatch{{width:10px;height:10px;border-radius:50%}}
-.kv th{{position:static;width:190px;color:var(--muted)}}code{{word-break:break-all}}footer{{padding:0 24px 25px;text-align:center;color:var(--muted)}}
-@media print{{nav{{display:none}}.tab{{display:block!important;break-before:page}}canvas{{height:500px}}.table-wrap{{max-height:none;overflow:visible}}}}
-</style>
-</head>
-<body>
-<header><h1>{_escape(title)}</h1><p>{_escape(inspection.file_name)} · structure inspected directly from HDF5 without loading the complete expression matrix</p></header>
-<nav><button class="active" data-tab="summary">Summary</button><button data-tab="embeddings">Embeddings</button><button data-tab="metadata">Metadata</button><button data-tab="provenance">Provenance</button></nav>
-<main>
-<section id="summary" class="tab active">
-<div class="grid metrics">
-<div class="card metric"><strong>{inspection.n_obs:,}</strong><span>Cells / observations</span></div>
-<div class="card metric"><strong>{inspection.n_vars:,}</strong><span>Genes / variables</span></div>
-<div class="card metric"><strong>{_format_bytes(inspection.file_size_bytes)}</strong><span>File size</span></div>
-<div class="card metric"><strong>{density}</strong><span>Stored-entry density (sparse) / sampled density (dense)</span></div>
-<div class="card metric"><strong>{len(inspection.layers)}</strong><span>Layers</span></div>
-<div class="card metric"><strong>{len(inspection.embeddings)}</strong><span>Previewable embeddings</span></div>
-</div>
-<div class="grid two" style="margin-top:16px">
-<div class="card"><h2>Expression matrix</h2><table class="kv"><tbody>
-<tr><th>Shape</th><td>{matrix.shape[0]:,} × {matrix.shape[1]:,}</td></tr>
-<tr><th>Encoding</th><td>{_escape(matrix.encoding)}</td></tr>
-<tr><th>Data type</th><td>{_escape(matrix.dtype or 'Not reported')}</td></tr>
-<tr><th>Stored entries (may include zeros)</th><td>{f'{matrix.nnz:,}' if matrix.nnz is not None else 'Sampled only'}</td></tr>
-<tr><th>Sample range</th><td>{_format_number(matrix.sample_minimum)} to {_format_number(matrix.sample_maximum)}</td></tr>
-<tr><th>Sample mean</th><td>{_format_number(matrix.sample_mean)}</td></tr>
-</tbody></table></div>
-<div class="card"><h2>Available structures</h2><table class="kv"><tbody>
-<tr><th>Annotation field</th><td>{_escape(inspection.likely_annotation or 'Not detected')}</td></tr>
-<tr><th>obsm</th><td>{_escape(', '.join(inspection.obsm) or 'None')}</td></tr>
-<tr><th>layers</th><td>{_escape(', '.join(inspection.layers) or 'None')}</td></tr>
-<tr><th>uns</th><td>{_escape(', '.join(inspection.uns[:30]) or 'None')}</td></tr>
-<tr><th>raw</th><td>{'Present' if inspection.has_raw else 'Absent'}</td></tr>
-</tbody></table></div>
-<div class="card warning"><h2>Inspection notes</h2><ul>{warnings}</ul></div>
-<div class="card"><h2>Interpretation</h2><p>This is a structural and sampled metadata preview. It does not claim sequencing, tissue, segmentation, or biological quality. Numeric and free-text column summaries may be sampled to keep inspection bounded in memory and time.</p></div>
-</div>
-</section>
-<section id="embeddings" class="tab">
-<div class="card"><div class="controls"><label for="embedding-select"><strong>View</strong></label><select id="embedding-select">{embedding_options}</select><span id="point-count" class="muted"></span></div><canvas id="embedding-canvas" width="1100" height="700"></canvas><div id="legend" class="legend"></div></div>
-</section>
-<section id="metadata" class="tab">
-<div class="card"><h2>Observation columns</h2><p class="muted">{len(inspection.obs_column_names)} total columns; {len(inspection.obs_columns)} shown with detailed summaries.</p><div class="table-wrap"><table><thead><tr><th>Name</th><th>Dtype</th><th>Encoding</th><th>Coverage</th><th>Preview</th></tr></thead><tbody>{_column_rows(inspection.obs_columns)}</tbody></table></div></div>
-<div class="card" style="margin-top:16px"><h2>Variable columns</h2><p class="muted">{len(inspection.var_column_names)} total columns; {len(inspection.var_columns)} shown with detailed summaries.</p><div class="table-wrap"><table><thead><tr><th>Name</th><th>Dtype</th><th>Encoding</th><th>Coverage</th><th>Preview</th></tr></thead><tbody>{_column_rows(inspection.var_columns)}</tbody></table></div></div>
-</section>
-<section id="provenance" class="tab"><div class="card"><h2>File provenance</h2><table class="kv"><tbody><tr><th>Source path</th><td><code>{_escape(inspection.source_path)}</code></td></tr><tr><th>Generator</th><td>CellOnDesk</td></tr><tr><th>Reader</th><td>Direct HDF5 structural inspection</td></tr><tr><th>Expression loading</th><td>Full matrix not loaded</td></tr><tr><th>Embedded points</th><td>{sum(len(item.sampled_points) for item in inspection.embeddings):,}</td></tr></tbody></table></div></section>
-</main>
-<footer>CellOnDesk local H5AD summary · all report data and scripts are embedded in this file.</footer>
-<script type="application/json" id="inspection-data">{payload}</script>
-<script>
-const data=JSON.parse(document.getElementById('inspection-data').textContent);
-const tabs=[...document.querySelectorAll('nav button')];tabs.forEach(button=>button.addEventListener('click',()=>{{tabs.forEach(item=>item.classList.remove('active'));document.querySelectorAll('.tab').forEach(item=>item.classList.remove('active'));button.classList.add('active');document.getElementById(button.dataset.tab).classList.add('active');if(button.dataset.tab==='embeddings')draw();}}));
-const select=document.getElementById('embedding-select'),canvas=document.getElementById('embedding-canvas'),ctx=canvas.getContext('2d'),legend=document.getElementById('legend'),count=document.getElementById('point-count');
-function hue(label){{let h=2166136261;for(let i=0;i<label.length;i++){{h^=label.charCodeAt(i);h=Math.imul(h,16777619);}}return Math.abs(h)%360;}}
-function draw(){{ctx.clearRect(0,0,canvas.width,canvas.height);legend.innerHTML='';if(!data.embeddings.length){{ctx.fillStyle='#65737d';ctx.font='18px sans-serif';ctx.fillText('No previewable embedding found.',40,60);count.textContent='';return;}}const item=data.embeddings[Number(select.value)||0],pts=item.sampled_points;if(!pts.length)return;const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]),xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys),pad=30,sx=(canvas.width-2*pad)/(xmax-xmin||1),sy=(canvas.height-2*pad)/(ymax-ymin||1);const categories=[...new Set(item.color_values||[])];const colors=new Map(categories.map(label=>[label,`hsl(${{hue(label)}} 58% 47%)`]));ctx.globalAlpha=0.7;for(let i=0;i<pts.length;i++){{const p=pts[i],label=(item.color_values||[])[i],color=label?colors.get(label):'#167f9c';ctx.fillStyle=color;ctx.beginPath();ctx.arc(pad+(p[0]-xmin)*sx,canvas.height-pad-(p[1]-ymin)*sy,2.2,0,Math.PI*2);ctx.fill();}}ctx.globalAlpha=1;count.textContent=`${{pts.length.toLocaleString()}} of ${{item.total_points.toLocaleString()}} points · ${{item.key}}`;categories.slice(0,24).forEach(label=>{{const node=document.createElement('span');node.className='legend-item';node.innerHTML=`<span class="swatch" style="background:${{colors.get(label)}}"></span><span></span>`;node.lastChild.textContent=label;legend.appendChild(node);}});if(categories.length>24){{const node=document.createElement('span');node.className='muted';node.textContent=`+${{categories.length-24}} more`;legend.appendChild(node);}}}}
-select.addEventListener('change',draw);draw();
-</script>
-</body></html>"""
+    for char, escaped in (
+        ("&", "\\u0026"),
+        ("<", "\\u003c"),
+        (">", "\\u003e"),
+        ("\u2028", "\\u2028"),
+        ("\u2029", "\\u2029"),
+    ):
+        payload = payload.replace(char, escaped)
+    matrix, provenance = inspection.matrix, inspection.provenance
+    sample = inspection.obs_sample
+    coverage = (
+        f"{'Sampled' if len(sample.row_indices) < inspection.n_obs else 'All rows'}: "
+        f"{len(sample.row_indices):,} / {inspection.n_obs:,} observations for metadata charts. "
+        "Missing values remain in composition denominators."
+        if sample
+        else "Metadata chart coverage was not recorded by this older inspection."
+    )
+    notes = list(inspection.warnings)
+    if inspection.scientific:
+        notes.extend(inspection.scientific.warnings)
+        notes.extend(c.reason for c in inspection.scientific.capabilities if c.state == "invalid")
+    warnings = "".join(f"<li>{_escape(note)}</li>" for note in dict.fromkeys(notes))
+    warnings = warnings or "<li>No issues detected within the bounded inspection scope.</li>"
+    matrix_rows = _kv(
+        [
+            ("Shape", f"{matrix.shape[0]:,} × {matrix.shape[1]:,}"),
+            ("Encoding / dtype", f"{matrix.encoding} / {matrix.dtype or 'not recorded'}"),
+            ("Stored entries", f"{matrix.nnz:,}" if matrix.nnz is not None else "Not available"),
+            (
+                "Stored-entry ratio" if matrix.nnz is not None else "Finite block nonzero fraction",
+                f"{100 * matrix.density:.3f}%" if matrix.density is not None else "Not available",
+            ),
+            (
+                "Finite values in X sample",
+                matrix.sample_total if matrix.sample_total is not None else "Not available",
+            ),
+            (
+                "Sample range",
+                (
+                    f"{_format_number(matrix.sample_minimum)} to "
+                    f"{_format_number(matrix.sample_maximum)}"
+                ),
+            ),
+            ("Sample mean", _format_number(matrix.sample_mean)),
+            ("Sampling scope", matrix.sample_scope),
+        ]
+    )
+    structures = _kv(
+        [
+            ("Detected annotation", inspection.likely_annotation or "Not detected"),
+            ("Layers", ", ".join(inspection.layers) or "None"),
+            ("obsm", ", ".join(inspection.obsm) or "None"),
+            ("uns keys", ", ".join(inspection.uns) or "None"),
+            ("raw", "Present (not summarized)" if inspection.has_raw else "Absent"),
+        ]
+    )
+    provenance_rows: list[tuple[str, object]] = [
+        ("Source path", inspection.source_path),
+        ("Source size", f"{inspection.file_size_bytes:,} bytes"),
+        ("Report renderer", f"CellOnDesk {__version__}"),
+        ("Report schema", inspection.schema_version),
+        ("Reader", "Direct HDF5; source opened read-only; full X never loaded"),
+    ]
+    if provenance:
+        provenance_rows.extend(
+            [
+                ("Inspection generator", f"CellOnDesk {provenance.generator_version}"),
+                ("Inspected at (UTC)", provenance.inspected_at),
+                ("Source mtime (ns since epoch)", provenance.source_mtime_ns),
+                (
+                    "Source stat comparison",
+                    "Size, mtime and identity unchanged during inspection"
+                    if provenance.source_stat_unchanged
+                    else "CHANGED during inspection",
+                ),
+                ("H5AD encoding", f"{provenance.encoding_type} / {provenance.encoding_version}"),
+                ("Dependencies", "; ".join(f"{k} {v}" for k, v in provenance.dependencies.items())),
+                (
+                    "Configured limits",
+                    "; ".join(f"{k}={v:,}" for k, v in provenance.limits.items()),
+                ),
+                ("Integrity scope", provenance.integrity_scope),
+            ]
+        )
+    else:
+        provenance_rows.append(("Inspection provenance", "Not recorded by this older inspection"))
+    return template.substitute(
+        title=_escape(title),
+        file_name=_escape(inspection.file_name),
+        version=__version__,
+        css=resources.joinpath("dashboard.css").read_text(encoding="utf-8"),
+        scripts="\n".join(
+            resources.joinpath(name).read_text(encoding="utf-8")
+            for name in (
+                "core.js",
+                "embeddings.js",
+                "composition.js",
+                "qc.js",
+                "modalities.js",
+                "dashboard.js",
+            )
+        ),
+        payload=payload,
+        storage_format=_escape(inspection.storage_format),
+        scientific_markup=scientific_markup(inspection.scientific),
+        n_obs=f"{inspection.n_obs:,}",
+        n_vars=f"{inspection.n_vars:,}",
+        file_size=_format_bytes(inspection.file_size_bytes),
+        sample_count=f"{len(sample.row_indices):,}" if sample else "Not recorded",
+        coverage=_escape(coverage),
+        sampling_note=(
+            "Row sampling is deterministic, not random; rare populations may be missed."
+            if sample and len(sample.row_indices) < sample.total_rows
+            else "Each view states its coverage and any exclusions; metadata and embedding "
+            "samples can differ."
+        ),
+        matrix_rows=matrix_rows,
+        structures=structures,
+        warnings=warnings,
+        provenance_rows=_kv(provenance_rows),
+        obs_count=len(inspection.obs_column_names),
+        var_count=len(inspection.var_column_names),
+        obs_shown=len(inspection.obs_columns),
+        var_shown=len(inspection.var_columns),
+        obs_rows=_column_rows(inspection.obs_columns),
+        var_rows=_column_rows(inspection.var_columns),
+    )
 
 
 def write_h5ad_report(
     inspection: H5ADInspection,
     destination: str | Path,
     *,
-    title: str = "CellOnDesk H5AD Summary",
+    title: str | None = None,
 ) -> Path:
-    destination = Path(destination)
+    destination = validate_export_destination(inspection, destination)
     destination.write_text(render_h5ad_report(inspection, title=title), encoding="utf-8")
+    return destination
+
+
+def validate_export_destination(inspection: H5ADInspection, destination: str | Path) -> Path:
+    """Protect the source, including symlink/hardlink aliases, for HTML and JSON exports."""
+    destination = Path(destination)
+    source = Path(inspection.source_path).expanduser().resolve()
+    if destination.resolve() == source or (
+        destination.exists() and source.exists() and destination.samefile(source)
+    ):
+        raise ValueError("Export destination must not overwrite the source H5AD")
+    if destination.suffix.lower() in {".h5ad", ".h5mu", ".zarr", ".imzml", ".ibd", ".tif", ".tiff"}:
+        raise ValueError("Export destination must not have an .h5ad or other scientific source extension")
     return destination
